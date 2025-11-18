@@ -576,6 +576,73 @@ pub async fn remote_fedi(instance: &str) -> Result<()> {
     Ok(())
 }
 
+/// Test connectivity to a specific remote ActivityPub user (read-only, no data sent)
+pub async fn remote_user(username: &str, instance: &str) -> Result<()> {
+    println!("{}", "Testing connectivity to remote ActivityPub user...".cyan().bold());
+    println!("User: {}@{}\n", username, instance);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+
+    let mut results = Vec::new();
+    let base = format!("https://{}", instance.trim_end_matches('/'));
+
+    // Test 1: WebFinger lookup for the specific user
+    let webfinger_result = test_user_webfinger(&client, &base, username, instance).await;
+    let actor_url = webfinger_result.1.clone();
+    results.push(webfinger_result.0);
+
+    // Test 2: Fetch Actor document (if WebFinger succeeded)
+    if let Some(url) = actor_url {
+        let actor_result = test_user_actor(&client, &url).await;
+        let outbox_url = actor_result.1.clone();
+        results.push(actor_result.0);
+
+        // Test 3: Fetch public outbox
+        if let Some(outbox) = outbox_url {
+            results.push(test_user_outbox(&client, &outbox).await);
+        } else {
+            results.push(TestResult {
+                name: "Public Outbox".to_string(),
+                passed: false,
+                message: "No outbox URL found in actor".to_string(),
+                duration_ms: 0,
+            });
+        }
+
+        // Test 4: Fetch followers/following counts
+        results.push(test_user_collections(&client, &url).await);
+    } else {
+        // Skip remaining tests if WebFinger failed
+        results.push(TestResult {
+            name: "Actor Document".to_string(),
+            passed: false,
+            message: "Skipped (WebFinger failed)".to_string(),
+            duration_ms: 0,
+        });
+        results.push(TestResult {
+            name: "Public Outbox".to_string(),
+            passed: false,
+            message: "Skipped (WebFinger failed)".to_string(),
+            duration_ms: 0,
+        });
+        results.push(TestResult {
+            name: "Collections".to_string(),
+            passed: false,
+            message: "Skipped (WebFinger failed)".to_string(),
+            duration_ms: 0,
+        });
+    }
+
+    // Print results
+    print_test_results(&results)?;
+
+    println!("\n{}", "Note: All tests are read-only. No data was sent to the user.".dimmed());
+
+    Ok(())
+}
+
 /// Test connectivity to Bluesky network
 pub async fn remote_bsky() -> Result<()> {
     println!("{}", "Testing remote Bluesky/AT Protocol connectivity...".cyan().bold());
@@ -1016,6 +1083,306 @@ async fn test_bsky_public_feed(client: &reqwest::Client) -> TestResult {
             message: format!("Request failed: {}", e),
             duration_ms: start.elapsed().as_millis() as u64,
         },
+    }
+}
+
+/// Test WebFinger lookup for a specific user
+async fn test_user_webfinger(
+    client: &reqwest::Client,
+    base: &str,
+    username: &str,
+    instance: &str,
+) -> (TestResult, Option<String>) {
+    let url = format!(
+        "{}/.well-known/webfinger?resource=acct:{}@{}",
+        base, username, instance
+    );
+    let start = std::time::Instant::now();
+
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<Value>().await {
+                Ok(json) => {
+                    // Find the ActivityPub actor URL
+                    let actor_url = json["links"]
+                        .as_array()
+                        .and_then(|links| {
+                            links.iter().find(|link| {
+                                link["rel"].as_str() == Some("self")
+                                    && link["type"]
+                                        .as_str()
+                                        .map(|t| t.contains("activity"))
+                                        .unwrap_or(false)
+                            })
+                        })
+                        .and_then(|link| link["href"].as_str())
+                        .map(|s| s.to_string());
+
+                    let subject = json["subject"].as_str().unwrap_or("unknown");
+                    (
+                        TestResult {
+                            name: "WebFinger Lookup".to_string(),
+                            passed: true,
+                            message: format!("Found: {}", subject),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        },
+                        actor_url,
+                    )
+                }
+                Err(e) => (
+                    TestResult {
+                        name: "WebFinger Lookup".to_string(),
+                        passed: false,
+                        message: format!("Invalid JSON: {}", e),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    },
+                    None,
+                ),
+            }
+        }
+        Ok(resp) if resp.status() == 404 => (
+            TestResult {
+                name: "WebFinger Lookup".to_string(),
+                passed: false,
+                message: format!("User not found: {}@{}", username, instance),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+            None,
+        ),
+        Ok(resp) => (
+            TestResult {
+                name: "WebFinger Lookup".to_string(),
+                passed: false,
+                message: format!("Status: {}", resp.status()),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+            None,
+        ),
+        Err(e) => (
+            TestResult {
+                name: "WebFinger Lookup".to_string(),
+                passed: false,
+                message: format!("Request failed: {}", e),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+            None,
+        ),
+    }
+}
+
+/// Test fetching a specific user's Actor document
+async fn test_user_actor(client: &reqwest::Client, actor_url: &str) -> (TestResult, Option<String>) {
+    let start = std::time::Instant::now();
+
+    match client
+        .get(actor_url)
+        .header("Accept", "application/activity+json")
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<Value>().await {
+                Ok(json) => {
+                    let name = json["name"]
+                        .as_str()
+                        .or_else(|| json["preferredUsername"].as_str())
+                        .unwrap_or("Unknown");
+                    let actor_type = json["type"].as_str().unwrap_or("Unknown");
+                    let outbox_url = json["outbox"].as_str().map(|s| s.to_string());
+
+                    // Display some profile info
+                    let followers = json["followers"]
+                        .as_str()
+                        .map(|_| "yes")
+                        .unwrap_or("no");
+                    let following = json["following"]
+                        .as_str()
+                        .map(|_| "yes")
+                        .unwrap_or("no");
+
+                    (
+                        TestResult {
+                            name: "Actor Document".to_string(),
+                            passed: true,
+                            message: format!(
+                                "{} ({}) - followers:{} following:{}",
+                                name, actor_type, followers, following
+                            ),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        },
+                        outbox_url,
+                    )
+                }
+                Err(e) => (
+                    TestResult {
+                        name: "Actor Document".to_string(),
+                        passed: false,
+                        message: format!("Invalid JSON: {}", e),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    },
+                    None,
+                ),
+            }
+        }
+        Ok(resp) => (
+            TestResult {
+                name: "Actor Document".to_string(),
+                passed: false,
+                message: format!("Status: {}", resp.status()),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+            None,
+        ),
+        Err(e) => (
+            TestResult {
+                name: "Actor Document".to_string(),
+                passed: false,
+                message: format!("Request failed: {}", e),
+                duration_ms: start.elapsed().as_millis() as u64,
+            },
+            None,
+        ),
+    }
+}
+
+/// Test fetching a user's public outbox
+async fn test_user_outbox(client: &reqwest::Client, outbox_url: &str) -> TestResult {
+    let start = std::time::Instant::now();
+
+    match client
+        .get(outbox_url)
+        .header("Accept", "application/activity+json")
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<Value>().await {
+                Ok(json) => {
+                    let total = json["totalItems"].as_u64().unwrap_or(0);
+                    let collection_type = json["type"].as_str().unwrap_or("Collection");
+
+                    TestResult {
+                        name: "Public Outbox".to_string(),
+                        passed: true,
+                        message: format!("{} with {} items", collection_type, total),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    }
+                }
+                Err(e) => TestResult {
+                    name: "Public Outbox".to_string(),
+                    passed: false,
+                    message: format!("Invalid JSON: {}", e),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                },
+            }
+        }
+        Ok(resp) if resp.status() == 401 || resp.status() == 403 => TestResult {
+            name: "Public Outbox".to_string(),
+            passed: true,
+            message: "Outbox exists (auth required for contents)".to_string(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Ok(resp) => TestResult {
+            name: "Public Outbox".to_string(),
+            passed: false,
+            message: format!("Status: {}", resp.status()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Err(e) => TestResult {
+            name: "Public Outbox".to_string(),
+            passed: false,
+            message: format!("Request failed: {}", e),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+    }
+}
+
+/// Test fetching user's followers/following collection info
+async fn test_user_collections(client: &reqwest::Client, actor_url: &str) -> TestResult {
+    let start = std::time::Instant::now();
+
+    // First get the actor to find collection URLs
+    let actor_resp = match client
+        .get(actor_url)
+        .header("Accept", "application/activity+json")
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => resp,
+        _ => {
+            return TestResult {
+                name: "Collections".to_string(),
+                passed: false,
+                message: "Could not fetch actor for collection URLs".to_string(),
+                duration_ms: start.elapsed().as_millis() as u64,
+            }
+        }
+    };
+
+    let json: Value = match actor_resp.json().await {
+        Ok(j) => j,
+        Err(_) => {
+            return TestResult {
+                name: "Collections".to_string(),
+                passed: false,
+                message: "Invalid actor JSON".to_string(),
+                duration_ms: start.elapsed().as_millis() as u64,
+            }
+        }
+    };
+
+    let mut info = Vec::new();
+
+    // Try to get followers count
+    if let Some(followers_url) = json["followers"].as_str() {
+        if let Ok(resp) = client
+            .get(followers_url)
+            .header("Accept", "application/activity+json")
+            .send()
+            .await
+        {
+            if resp.status().is_success() {
+                if let Ok(coll) = resp.json::<Value>().await {
+                    if let Some(count) = coll["totalItems"].as_u64() {
+                        info.push(format!("followers:{}", count));
+                    }
+                }
+            }
+        }
+    }
+
+    // Try to get following count
+    if let Some(following_url) = json["following"].as_str() {
+        if let Ok(resp) = client
+            .get(following_url)
+            .header("Accept", "application/activity+json")
+            .send()
+            .await
+        {
+            if resp.status().is_success() {
+                if let Ok(coll) = resp.json::<Value>().await {
+                    if let Some(count) = coll["totalItems"].as_u64() {
+                        info.push(format!("following:{}", count));
+                    }
+                }
+            }
+        }
+    }
+
+    if info.is_empty() {
+        TestResult {
+            name: "Collections".to_string(),
+            passed: true,
+            message: "Collection URLs found (counts not public)".to_string(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        }
+    } else {
+        TestResult {
+            name: "Collections".to_string(),
+            passed: true,
+            message: info.join(", "),
+            duration_ms: start.elapsed().as_millis() as u64,
+        }
     }
 }
 

@@ -231,6 +231,11 @@ enum TestCommands {
     },
     /// Test connectivity to Bluesky network
     RemoteBsky,
+    /// Test connectivity to a specific remote user (read-only, no data sent)
+    RemoteUser {
+        /// User to test (e.g., gargron@mastodon.social)
+        user: String,
+    },
 }
 
 #[tokio::main]
@@ -288,6 +293,18 @@ async fn main() {
             TestCommands::Quick { url } => test::quick(&url).await,
             TestCommands::RemoteFedi { instance } => test::remote_fedi(&instance).await,
             TestCommands::RemoteBsky => test::remote_bsky().await,
+            TestCommands::RemoteUser { user } => {
+                // Parse user@instance format
+                let parts: Vec<&str> = user.split('@').collect();
+                if parts.len() != 2 {
+                    Err(format!(
+                        "Invalid user format '{}'. Use username@instance (e.g., gargron@mastodon.social)",
+                        user
+                    ).into())
+                } else {
+                    test::remote_user(parts[0], parts[1]).await
+                }
+            }
         },
     };
 

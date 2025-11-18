@@ -461,6 +461,24 @@ sovereign test remote-fedi hachyderm.io
 sovereign test remote-bsky
 ```
 
+### Test Connection to a Specific User
+
+Test connectivity to a specific remote user without sending them any data (read-only):
+
+```bash
+# Test connection to a user (username@instance format)
+sovereign test remote-user gargron@mastodon.social
+sovereign test remote-user marcjones@mastodon.social
+```
+
+This performs read-only tests:
+- WebFinger lookup (discover the user's profile URL)
+- Actor document fetch (get their public profile)
+- Public outbox fetch (their public posts)
+- Collection info (followers/following counts if public)
+
+**No data is sent to the user** - this only fetches publicly available information.
+
 These tests help distinguish between "their system is down" vs "our code has bugs" by verifying:
 
 **For ActivityPub/Mastodon (`remote-fedi`):**
@@ -628,4 +646,5 @@ sovereign test validate https://yourdomain.com --verbose
 # Remote network testing
 sovereign test remote-fedi mastodon.social
 sovereign test remote-bsky
+sovereign test remote-user gargron@mastodon.social
 ```
