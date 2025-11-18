@@ -5,7 +5,7 @@ use std::process;
 mod commands;
 mod ui;
 
-use commands::{identity, config, bsky, fedi, server};
+use commands::{identity, config, bsky, fedi, server, test};
 
 #[derive(Parser)]
 #[command(name = "sovereign")]
@@ -42,6 +42,11 @@ enum Commands {
     Fedi {
         #[command(subcommand)]
         command: FediCommands,
+    },
+    /// Test and validate deployments
+    Test {
+        #[command(subcommand)]
+        command: TestCommands,
     },
 }
 
@@ -204,6 +209,23 @@ enum FediCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum TestCommands {
+    /// Run full deployment validation tests
+    Validate {
+        /// Server URL (e.g., https://yourdomain.com or http://localhost:8787)
+        url: String,
+        /// Show verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// Quick connectivity test
+    Quick {
+        /// Server URL
+        url: String,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -253,6 +275,10 @@ async fn main() {
             FediCommands::Favorite { url } => fedi::favorite(&url).await,
             FediCommands::Boost { url } => fedi::boost(&url).await,
             FediCommands::Profile { user } => fedi::profile(user.as_deref()).await,
+        },
+        Commands::Test { command } => match command {
+            TestCommands::Validate { url, verbose } => test::validate(&url, verbose).await,
+            TestCommands::Quick { url } => test::quick(&url).await,
         },
     };
 

@@ -5,7 +5,7 @@ This guide walks you through setting up and testing Sovereign on your Ubuntu des
 ## Build Status
 
 - **sovereign-core**: ✅ Builds and tests pass (21 tests)
-- **sovereign-cli**: ✅ Builds and tests pass (4 tests)
+- **sovereign-cli**: ✅ Builds and tests pass (5 tests)
 - **sovereign-worker**: ✅ Builds and tests pass (7 tests)
 
 ---
@@ -388,6 +388,65 @@ curl -H "Accept: application/activity+json" \
 
 ---
 
+## Deployment Validation
+
+Use the built-in test command to validate your deployment:
+
+### Quick Connectivity Test
+
+```bash
+# Test if server is reachable
+sovereign test quick http://localhost:8787
+
+# Test production deployment
+sovereign test quick https://yourdomain.com
+```
+
+### Full Validation Suite
+
+```bash
+# Run all validation tests against mock server
+sovereign test validate http://localhost:8787
+
+# With verbose output (shows response details)
+sovereign test validate http://localhost:8787 --verbose
+
+# Test production deployment
+sovereign test validate https://yourdomain.com --verbose
+```
+
+The validation suite tests:
+- Health endpoint
+- WebFinger discovery
+- NodeInfo metadata
+- Actor document (ActivityPub)
+- DID document (AT Protocol)
+- Outbox collection
+- AT Protocol server description
+
+### Sample Output
+
+```
+Running deployment validation tests...
+Target: http://localhost:8787
+
+Test Results:
+============================================================
+[PASS] Health Check (12ms)
+[PASS] WebFinger (8ms)
+[PASS] NodeInfo (15ms)
+[PASS] Actor Document (6ms)
+[PASS] DID Document (5ms)
+[PASS] Outbox (7ms)
+[PASS] AT Protocol Server (9ms)
+============================================================
+Total: 7 passed, 0 failed (62 ms)
+
+All tests passed!
+```
+
+---
+
 ## Deploying to Cloudflare
 
 The worker crate is ready for deployment:
@@ -512,4 +571,9 @@ sovereign bsky timeline
 sovereign fedi whoami
 sovereign fedi post "Hello!"
 sovereign fedi timeline
+
+# Deployment testing
+sovereign test quick http://localhost:8787
+sovereign test validate http://localhost:8787
+sovereign test validate https://yourdomain.com --verbose
 ```
