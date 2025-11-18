@@ -224,6 +224,13 @@ enum TestCommands {
         /// Server URL
         url: String,
     },
+    /// Test connectivity to a remote Mastodon/ActivityPub instance
+    RemoteFedi {
+        /// Instance domain (e.g., mastodon.social)
+        instance: String,
+    },
+    /// Test connectivity to Bluesky network
+    RemoteBsky,
 }
 
 #[tokio::main]
@@ -279,6 +286,8 @@ async fn main() {
         Commands::Test { command } => match command {
             TestCommands::Validate { url, verbose } => test::validate(&url, verbose).await,
             TestCommands::Quick { url } => test::quick(&url).await,
+            TestCommands::RemoteFedi { instance } => test::remote_fedi(&instance).await,
+            TestCommands::RemoteBsky => test::remote_bsky().await,
         },
     };
 

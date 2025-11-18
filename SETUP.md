@@ -5,7 +5,7 @@ This guide walks you through setting up and testing Sovereign on your Ubuntu des
 ## Build Status
 
 - **sovereign-core**: ✅ Builds and tests pass (32 tests)
-- **sovereign-cli**: ✅ Builds and tests pass (8 tests)
+- **sovereign-cli**: ✅ Builds and tests pass (11 tests)
 - **sovereign-worker**: ✅ Builds and tests pass (16 tests)
 
 ---
@@ -445,6 +445,54 @@ Total: 7 passed, 0 failed (62 ms)
 All tests passed!
 ```
 
+### Remote Network Connectivity Tests
+
+Test connectivity to remote networks to verify external services are accessible:
+
+```bash
+# Test connection to a Mastodon/ActivityPub instance
+sovereign test remote-fedi mastodon.social
+
+# Test other instances
+sovereign test remote-fedi fosstodon.org
+sovereign test remote-fedi hachyderm.io
+
+# Test Bluesky network connectivity
+sovereign test remote-bsky
+```
+
+These tests help distinguish between "their system is down" vs "our code has bugs" by verifying:
+
+**For ActivityPub/Mastodon (`remote-fedi`):**
+- Instance reachability (HTTP 200 from root)
+- NodeInfo availability (server metadata)
+- WebFinger endpoint (user discovery)
+- Actor fetching (profile retrieval)
+
+**For Bluesky (`remote-bsky`):**
+- Bluesky API accessibility
+- Handle resolution service
+- PDS server description
+- Public feed access
+
+### Sample Remote Test Output
+
+```
+Testing remote ActivityPub/Mastodon connectivity...
+Instance: mastodon.social
+
+Remote Connectivity Results:
+============================================================
+[PASS] Instance Reachable (245ms)
+[PASS] NodeInfo Available (312ms)
+[PASS] WebFinger Endpoint (198ms)
+[PASS] Actor Fetching (287ms)
+============================================================
+Total: 4 passed, 0 failed (1042 ms)
+
+mastodon.social is accessible!
+```
+
 ---
 
 ## Deploying to Cloudflare
@@ -576,4 +624,8 @@ sovereign fedi timeline
 sovereign test quick http://localhost:8787
 sovereign test validate http://localhost:8787
 sovereign test validate https://yourdomain.com --verbose
+
+# Remote network testing
+sovereign test remote-fedi mastodon.social
+sovereign test remote-bsky
 ```

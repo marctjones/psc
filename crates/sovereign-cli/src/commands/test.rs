@@ -542,6 +542,483 @@ async fn test_describe_server(client: &reqwest::Client, base_url: &str, verbose:
     }
 }
 
+/// Test connectivity to a remote ActivityPub/Mastodon instance
+pub async fn remote_fedi(instance: &str) -> Result<()> {
+    println!("{}", "Testing remote ActivityPub/Mastodon connectivity...".cyan().bold());
+    println!("Instance: {}\n", instance);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+
+    let mut results = Vec::new();
+    let base = if instance.starts_with("http") {
+        instance.trim_end_matches('/').to_string()
+    } else {
+        format!("https://{}", instance.trim_end_matches('/'))
+    };
+
+    // Test 1: Instance is reachable
+    results.push(test_fedi_reachable(&client, &base).await);
+
+    // Test 2: NodeInfo available
+    results.push(test_fedi_nodeinfo(&client, &base).await);
+
+    // Test 3: WebFinger endpoint works
+    results.push(test_fedi_webfinger(&client, &base).await);
+
+    // Test 4: Can fetch a public actor (usually admin or instance actor)
+    results.push(test_fedi_actor(&client, &base).await);
+
+    // Print results
+    print_test_results(&results)?;
+
+    Ok(())
+}
+
+/// Test connectivity to Bluesky network
+pub async fn remote_bsky() -> Result<()> {
+    println!("{}", "Testing remote Bluesky/AT Protocol connectivity...".cyan().bold());
+    println!("Network: bsky.social\n");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+
+    let mut results = Vec::new();
+
+    // Test 1: Public API is reachable
+    results.push(test_bsky_api(&client).await);
+
+    // Test 2: Can resolve a known handle
+    results.push(test_bsky_resolve_handle(&client).await);
+
+    // Test 3: PDS describe server
+    results.push(test_bsky_describe_server(&client).await);
+
+    // Test 4: Can fetch public posts
+    results.push(test_bsky_public_feed(&client).await);
+
+    // Print results
+    print_test_results(&results)?;
+
+    Ok(())
+}
+
+fn print_test_results(results: &[TestResult]) -> Result<()> {
+    println!("{}", "Test Results:".bold());
+    println!("{}", "=".repeat(60));
+
+    let mut passed = 0;
+    let mut failed = 0;
+    let mut total_time = 0;
+
+    for result in results {
+        total_time += result.duration_ms;
+        let status = if result.passed {
+            passed += 1;
+            "PASS".green().bold()
+        } else {
+            failed += 1;
+            "FAIL".red().bold()
+        };
+
+        println!(
+            "[{}] {} ({}ms)",
+            status,
+            result.name,
+            result.duration_ms
+        );
+
+        if !result.passed {
+            println!("     {}", result.message.dimmed());
+        }
+    }
+
+    println!("{}", "=".repeat(60));
+    println!(
+        "Total: {} passed, {} failed ({} ms)",
+        passed.to_string().green(),
+        failed.to_string().red(),
+        total_time
+    );
+
+    if failed > 0 {
+        println!("\n{}", "Some tests failed - remote service may be experiencing issues".yellow());
+    } else {
+        println!("\n{}", "All tests passed - remote service is operational".green().bold());
+    }
+
+    Ok(())
+}
+
+/// Test if Fediverse instance is reachable
+async fn test_fedi_reachable(client: &reqwest::Client, base: &str) -> TestResult {
+    let start = std::time::Instant::now();
+
+    match client.get(base).send().await {
+        Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => TestResult {
+            name: "Instance Reachable".to_string(),
+            passed: true,
+            message: format!("Status: {}", resp.status()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Ok(resp) => TestResult {
+            name: "Instance Reachable".to_string(),
+            passed: false,
+            message: format!("Status: {}", resp.status()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Err(e) => TestResult {
+            name: "Instance Reachable".to_string(),
+            passed: false,
+            message: format!("Connection failed: {}", e),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+    }
+}
+
+/// Test Fediverse NodeInfo
+async fn test_fedi_nodeinfo(client: &reqwest::Client, base: &str) -> TestResult {
+    let url = format!("{}/.well-known/nodeinfo", base);
+    let start = std::time::Instant::now();
+
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<Value>().await {
+                Ok(json) => {
+                    if json.get("links").is_some() {
+                        TestResult {
+                            name: "NodeInfo Available".to_string(),
+                            passed: true,
+                            message: "Valid NodeInfo response".to_string(),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        }
+                    } else {
+                        TestResult {
+                            name: "NodeInfo Available".to_string(),
+                            passed: false,
+                            message: "Missing links in response".to_string(),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        }
+                    }
+                }
+                Err(e) => TestResult {
+                    name: "NodeInfo Available".to_string(),
+                    passed: false,
+                    message: format!("Invalid JSON: {}", e),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                },
+            }
+        }
+        Ok(resp) => TestResult {
+            name: "NodeInfo Available".to_string(),
+            passed: false,
+            message: format!("Status: {}", resp.status()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Err(e) => TestResult {
+            name: "NodeInfo Available".to_string(),
+            passed: false,
+            message: format!("Request failed: {}", e),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+    }
+}
+
+/// Test Fediverse WebFinger (using instance's admin account pattern)
+async fn test_fedi_webfinger(client: &reqwest::Client, base: &str) -> TestResult {
+    // Extract domain from URL
+    let domain = base
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .split('/')
+        .next()
+        .unwrap_or("localhost");
+
+    // Try common admin accounts
+    let test_accounts = ["admin", "administrator", "instance"];
+    let start = std::time::Instant::now();
+
+    for account in &test_accounts {
+        let url = format!(
+            "{}/.well-known/webfinger?resource=acct:{}@{}",
+            base, account, domain
+        );
+
+        if let Ok(resp) = client.get(&url).send().await {
+            if resp.status().is_success() {
+                if let Ok(json) = resp.json::<Value>().await {
+                    if json.get("subject").is_some() {
+                        return TestResult {
+                            name: "WebFinger Endpoint".to_string(),
+                            passed: true,
+                            message: format!("Found account: {}", account),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    // WebFinger endpoint exists but no test account found
+    let url = format!(
+        "{}/.well-known/webfinger?resource=acct:test@{}",
+        base, domain
+    );
+
+    match client.get(&url).send().await {
+        Ok(resp) if resp.status() == 404 => TestResult {
+            name: "WebFinger Endpoint".to_string(),
+            passed: true,
+            message: "Endpoint works (no test account found)".to_string(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Ok(resp) if resp.status() == 400 => TestResult {
+            name: "WebFinger Endpoint".to_string(),
+            passed: true,
+            message: "Endpoint responds (400 for unknown user)".to_string(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Ok(resp) => TestResult {
+            name: "WebFinger Endpoint".to_string(),
+            passed: false,
+            message: format!("Unexpected status: {}", resp.status()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Err(e) => TestResult {
+            name: "WebFinger Endpoint".to_string(),
+            passed: false,
+            message: format!("Request failed: {}", e),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+    }
+}
+
+/// Test fetching a public actor
+async fn test_fedi_actor(client: &reqwest::Client, base: &str) -> TestResult {
+    // Try to fetch the instance actor (common in Mastodon)
+    let urls = [
+        format!("{}/actor", base),
+        format!("{}/users/admin", base),
+    ];
+    let start = std::time::Instant::now();
+
+    for url in &urls {
+        if let Ok(resp) = client
+            .get(url)
+            .header("Accept", "application/activity+json")
+            .send()
+            .await
+        {
+            if resp.status().is_success() {
+                if let Ok(json) = resp.json::<Value>().await {
+                    if json.get("type").is_some() && json.get("inbox").is_some() {
+                        let actor_type = json["type"].as_str().unwrap_or("Unknown");
+                        return TestResult {
+                            name: "Actor Fetching".to_string(),
+                            passed: true,
+                            message: format!("Found {} actor", actor_type),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    TestResult {
+        name: "Actor Fetching".to_string(),
+        passed: false,
+        message: "Could not fetch any public actor".to_string(),
+        duration_ms: start.elapsed().as_millis() as u64,
+    }
+}
+
+/// Test Bluesky API reachability
+async fn test_bsky_api(client: &reqwest::Client) -> TestResult {
+    let url = "https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor=bsky.app";
+    let start = std::time::Instant::now();
+
+    match client.get(url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<Value>().await {
+                Ok(json) => {
+                    let handle = json["handle"].as_str().unwrap_or("unknown");
+                    TestResult {
+                        name: "Bluesky API".to_string(),
+                        passed: true,
+                        message: format!("API accessible (fetched @{})", handle),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    }
+                }
+                Err(e) => TestResult {
+                    name: "Bluesky API".to_string(),
+                    passed: false,
+                    message: format!("Invalid JSON: {}", e),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                },
+            }
+        }
+        Ok(resp) => TestResult {
+            name: "Bluesky API".to_string(),
+            passed: false,
+            message: format!("Status: {}", resp.status()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Err(e) => TestResult {
+            name: "Bluesky API".to_string(),
+            passed: false,
+            message: format!("Request failed: {}", e),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+    }
+}
+
+/// Test Bluesky handle resolution
+async fn test_bsky_resolve_handle(client: &reqwest::Client) -> TestResult {
+    let url = "https://bsky.social/xrpc/com.atproto.identity.resolveHandle?handle=bsky.app";
+    let start = std::time::Instant::now();
+
+    match client.get(url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<Value>().await {
+                Ok(json) => {
+                    if let Some(did) = json["did"].as_str() {
+                        TestResult {
+                            name: "Handle Resolution".to_string(),
+                            passed: true,
+                            message: format!("Resolved to {}", &did[..20.min(did.len())]),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        }
+                    } else {
+                        TestResult {
+                            name: "Handle Resolution".to_string(),
+                            passed: false,
+                            message: "No DID in response".to_string(),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        }
+                    }
+                }
+                Err(e) => TestResult {
+                    name: "Handle Resolution".to_string(),
+                    passed: false,
+                    message: format!("Invalid JSON: {}", e),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                },
+            }
+        }
+        Ok(resp) => TestResult {
+            name: "Handle Resolution".to_string(),
+            passed: false,
+            message: format!("Status: {}", resp.status()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Err(e) => TestResult {
+            name: "Handle Resolution".to_string(),
+            passed: false,
+            message: format!("Request failed: {}", e),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+    }
+}
+
+/// Test Bluesky PDS describe server
+async fn test_bsky_describe_server(client: &reqwest::Client) -> TestResult {
+    let url = "https://bsky.social/xrpc/com.atproto.server.describeServer";
+    let start = std::time::Instant::now();
+
+    match client.get(url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<Value>().await {
+                Ok(json) => {
+                    let has_did = json.get("did").is_some();
+                    TestResult {
+                        name: "PDS Server Info".to_string(),
+                        passed: has_did,
+                        message: if has_did {
+                            "Server description available".to_string()
+                        } else {
+                            "Missing server DID".to_string()
+                        },
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    }
+                }
+                Err(e) => TestResult {
+                    name: "PDS Server Info".to_string(),
+                    passed: false,
+                    message: format!("Invalid JSON: {}", e),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                },
+            }
+        }
+        Ok(resp) => TestResult {
+            name: "PDS Server Info".to_string(),
+            passed: false,
+            message: format!("Status: {}", resp.status()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Err(e) => TestResult {
+            name: "PDS Server Info".to_string(),
+            passed: false,
+            message: format!("Request failed: {}", e),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+    }
+}
+
+/// Test fetching public Bluesky feed
+async fn test_bsky_public_feed(client: &reqwest::Client) -> TestResult {
+    let url = "https://public.api.bsky.app/xrpc/app.bsky.feed.getTimeline?limit=1";
+    let start = std::time::Instant::now();
+
+    // This endpoint requires auth, so we test a public profile's feed instead
+    let url = "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=bsky.app&limit=1";
+
+    match client.get(url).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<Value>().await {
+                Ok(json) => {
+                    if json.get("feed").is_some() {
+                        TestResult {
+                            name: "Public Feed Access".to_string(),
+                            passed: true,
+                            message: "Can fetch public feeds".to_string(),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        }
+                    } else {
+                        TestResult {
+                            name: "Public Feed Access".to_string(),
+                            passed: false,
+                            message: "No feed in response".to_string(),
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        }
+                    }
+                }
+                Err(e) => TestResult {
+                    name: "Public Feed Access".to_string(),
+                    passed: false,
+                    message: format!("Invalid JSON: {}", e),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                },
+            }
+        }
+        Ok(resp) => TestResult {
+            name: "Public Feed Access".to_string(),
+            passed: false,
+            message: format!("Status: {}", resp.status()),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+        Err(e) => TestResult {
+            name: "Public Feed Access".to_string(),
+            passed: false,
+            message: format!("Request failed: {}", e),
+            duration_ms: start.elapsed().as_millis() as u64,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
