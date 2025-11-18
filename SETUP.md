@@ -6,7 +6,7 @@ This guide walks you through setting up and testing Sovereign on your Ubuntu des
 
 - **sovereign-core**: ✅ Builds and tests pass (21 tests)
 - **sovereign-cli**: ✅ Builds and tests pass (4 tests)
-- **sovereign-worker**: ⚠️ Needs API updates for worker crate 0.4+
+- **sovereign-worker**: ✅ Builds and tests pass (7 tests)
 
 ---
 
@@ -388,9 +388,9 @@ curl -H "Accept: application/activity+json" \
 
 ---
 
-## Deploying to Cloudflare (Future)
+## Deploying to Cloudflare
 
-Once the worker crate is updated:
+The worker crate is ready for deployment:
 
 ### 1. Setup Cloudflare Resources
 
@@ -465,10 +465,9 @@ npx wrangler --version
 
 ## Next Steps
 
-1. **Complete Worker Crate**: Update `sovereign-worker` for worker crate 0.4+ API
-2. **Deploy to Cloudflare**: Use actual D1/R2 storage
-3. **Test Federation**: Connect with real Mastodon/Bluesky instances
-4. **Add UI**: Consider adding a simple web UI
+1. **Deploy to Cloudflare**: Use actual D1/R2 storage
+2. **Test Federation**: Connect with real Mastodon/Bluesky instances
+3. **Add UI**: Consider adding a simple web UI
 
 ---
 
