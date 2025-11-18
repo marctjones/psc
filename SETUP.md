@@ -4,9 +4,9 @@ This guide walks you through setting up and testing Sovereign on your Ubuntu des
 
 ## Build Status
 
-- **sovereign-core**: ✅ Builds and tests pass (21 tests)
-- **sovereign-cli**: ✅ Builds and tests pass (5 tests)
-- **sovereign-worker**: ✅ Builds and tests pass (7 tests)
+- **sovereign-core**: ✅ Builds and tests pass (32 tests)
+- **sovereign-cli**: ✅ Builds and tests pass (8 tests)
+- **sovereign-worker**: ✅ Builds and tests pass (16 tests)
 
 ---
 
