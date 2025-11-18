@@ -1,0 +1,31 @@
+# Build artifacts
+/target
+**/*.rs.bk
+Cargo.lock
+
+# Cloudflare
+.wrangler
+.dev.vars
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# Python virtual environments
+venv/
+.venv/
+__pycache__/
+*.pyc

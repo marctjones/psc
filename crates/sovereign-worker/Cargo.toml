@@ -1,0 +1,26 @@
+[package]
+name = "sovereign-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+sovereign-core = { path = "../sovereign-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+base64.workspace = true
+sha2.workspace = true
+
+worker = "0.0.21"
+ring = "0.17"
+rsa = { version = "0.9", features = ["sha2"] }
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+pretty_assertions = "1"
