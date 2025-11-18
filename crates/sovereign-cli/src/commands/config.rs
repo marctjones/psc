@@ -133,4 +133,51 @@ mod tests {
         assert_eq!(loaded.domain, Some("example.com".to_string()));
         assert_eq!(loaded.handle, Some("alice".to_string()));
     }
+
+    #[test]
+    fn test_config_default() {
+        let config = Config::default();
+
+        assert!(config.domain.is_none());
+        assert!(config.cloudflare_api_token.is_none());
+        assert!(config.handle.is_none());
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let config = Config {
+            domain: Some("test.com".to_string()),
+            cloudflare_api_token: None,
+            cloudflare_zone_id: None,
+            handle: Some("bob".to_string()),
+            server_url: None,
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("test.com"));
+        assert!(json.contains("bob"));
+
+        let parsed: Config = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.domain, Some("test.com".to_string()));
+    }
+
+    #[test]
+    fn test_config_all_fields() {
+        let config = Config {
+            domain: Some("d".to_string()),
+            cloudflare_api_token: Some("t".to_string()),
+            cloudflare_zone_id: Some("z".to_string()),
+            handle: Some("h".to_string()),
+            server_url: Some("u".to_string()),
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        let parsed: Config = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.domain.unwrap(), "d");
+        assert_eq!(parsed.cloudflare_api_token.unwrap(), "t");
+        assert_eq!(parsed.cloudflare_zone_id.unwrap(), "z");
+        assert_eq!(parsed.handle.unwrap(), "h");
+        assert_eq!(parsed.server_url.unwrap(), "u");
+    }
 }

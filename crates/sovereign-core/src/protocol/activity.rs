@@ -349,4 +349,152 @@ mod tests {
         assert_eq!(ni.usage.local_posts, 42);
         assert!(!ni.open_registrations);
     }
+
+    #[test]
+    fn test_build_accept_activity() {
+        let follow = build_follow_activity(
+            "https://other.com/follows/1",
+            "https://other.com/users/bob",
+            "https://example.com/users/alice",
+        );
+
+        let accept = build_accept_activity(
+            "https://example.com/accepts/1",
+            "https://example.com/users/alice",
+            follow,
+        );
+
+        assert_eq!(accept.activity_type, "Accept");
+        assert_eq!(accept.actor, "https://example.com/users/alice");
+        assert!(accept.object.is_some());
+    }
+
+    #[test]
+    fn test_build_like_activity() {
+        let like = build_like_activity(
+            "https://example.com/likes/1",
+            "https://example.com/users/alice",
+            "https://other.com/posts/42",
+        );
+
+        assert_eq!(like.activity_type, "Like");
+        assert_eq!(like.object.unwrap().as_str().unwrap(), "https://other.com/posts/42");
+        assert!(like.to.is_some());
+    }
+
+    #[test]
+    fn test_build_announce_activity() {
+        let announce = build_announce_activity(
+            "https://example.com/announces/1",
+            "https://example.com/users/alice",
+            "https://other.com/posts/42",
+        );
+
+        assert_eq!(announce.activity_type, "Announce");
+        assert_eq!(announce.object.unwrap().as_str().unwrap(), "https://other.com/posts/42");
+        assert!(announce.cc.is_some());
+    }
+
+    #[test]
+    fn test_build_undo_activity() {
+        let follow = build_follow_activity(
+            "https://example.com/follows/1",
+            "https://example.com/users/alice",
+            "https://other.com/users/bob",
+        );
+
+        let undo = build_undo_activity(
+            "https://example.com/undos/1",
+            "https://example.com/users/alice",
+            follow,
+        );
+
+        assert_eq!(undo.activity_type, "Undo");
+        assert!(undo.object.is_some());
+    }
+
+    #[test]
+    fn test_build_delete_activity() {
+        let delete = build_delete_activity(
+            "https://example.com/deletes/1",
+            "https://example.com/users/alice",
+            "https://example.com/posts/42",
+        );
+
+        assert_eq!(delete.activity_type, "Delete");
+        let object = delete.object.unwrap();
+        assert_eq!(object["type"], "Tombstone");
+        assert_eq!(object["id"], "https://example.com/posts/42");
+    }
+
+    #[test]
+    fn test_build_note_with_reply() {
+        let note = build_note(
+            "https://example.com/posts/2",
+            "https://example.com/users/alice",
+            "This is a reply!",
+            Some("https://other.com/posts/1"),
+        );
+
+        assert!(note.in_reply_to.is_some());
+        assert_eq!(note.in_reply_to.unwrap(), "https://other.com/posts/1");
+    }
+
+    #[test]
+    fn test_build_collection() {
+        let collection = build_collection(
+            "https://example.com/users/alice/outbox",
+            100,
+            Some("https://example.com/users/alice/outbox?page=1"),
+        );
+
+        assert_eq!(collection.collection_type, "OrderedCollection");
+        assert_eq!(collection.total_items, 100);
+        assert!(collection.first.is_some());
+    }
+
+    #[test]
+    fn test_actor_public_key() {
+        let actor = build_actor(
+            "alice",
+            "example.com",
+            None,
+            None,
+            "-----BEGIN PUBLIC KEY-----\nMIIBtest\n-----END PUBLIC KEY-----",
+        );
+
+        assert_eq!(actor.public_key.id, "https://example.com/users/alice#main-key");
+        assert_eq!(actor.public_key.owner, "https://example.com/users/alice");
+        assert!(actor.public_key.public_key_pem.contains("BEGIN PUBLIC KEY"));
+    }
+
+    #[test]
+    fn test_activity_constants() {
+        assert_eq!(ACTIVITY_CREATE, "Create");
+        assert_eq!(ACTIVITY_FOLLOW, "Follow");
+        assert_eq!(ACTIVITY_ACCEPT, "Accept");
+        assert_eq!(ACTIVITY_LIKE, "Like");
+        assert_eq!(ACTIVITY_ANNOUNCE, "Announce");
+        assert_eq!(ACTIVITY_UNDO, "Undo");
+        assert_eq!(ACTIVITY_DELETE, "Delete");
+        assert!(PUBLIC_COLLECTION.contains("Public"));
+    }
+
+    #[test]
+    fn test_webfinger_aliases() {
+        let wf = build_webfinger("bob", "test.org");
+
+        assert!(!wf.aliases.is_empty());
+        assert!(wf.aliases[0].contains("test.org"));
+        assert!(wf.aliases[0].contains("bob"));
+    }
+
+    #[test]
+    fn test_nodeinfo_protocols() {
+        let ni = build_nodeinfo(0);
+
+        assert_eq!(ni.protocols.len(), 1);
+        assert_eq!(ni.protocols[0], "activitypub");
+        assert_eq!(ni.usage.users.total, 1);
+    }
 }

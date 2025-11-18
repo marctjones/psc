@@ -210,4 +210,56 @@ mod tests {
         assert!(signature.contains("keyId="));
         assert!(signature.contains("signature="));
     }
+
+    #[test]
+    fn test_digest_consistency() {
+        let body = b"Test message";
+        let digest1 = calculate_digest(body);
+        let digest2 = calculate_digest(body);
+        assert_eq!(digest1, digest2);
+    }
+
+    #[test]
+    fn test_digest_different_inputs() {
+        let digest1 = calculate_digest(b"Hello");
+        let digest2 = calculate_digest(b"World");
+        assert_ne!(digest1, digest2);
+    }
+
+    #[test]
+    fn test_signature_contains_required_parts() {
+        let (private_key, _) = generate_ed25519_keypair().unwrap();
+
+        let sig = create_http_signature(
+            &private_key,
+            "https://example.com/key",
+            "GET",
+            "/test",
+            "example.com",
+            "Mon, 01 Jan 2024 00:00:00 GMT",
+            None,
+            SignatureAlgorithm::Ed25519,
+        ).unwrap();
+
+        assert!(sig.contains("headers="));
+        assert!(sig.contains("algorithm="));
+    }
+
+    #[test]
+    fn test_multiple_keypair_generations() {
+        let (private1, public1) = generate_ed25519_keypair().unwrap();
+        let (private2, public2) = generate_ed25519_keypair().unwrap();
+
+        // Different keypairs should be different
+        assert_ne!(private1, private2);
+        assert_ne!(public1, public2);
+    }
+
+    #[test]
+    fn test_empty_body_digest() {
+        let digest = calculate_digest(b"");
+        assert!(digest.starts_with("SHA-256="));
+        // Empty body should still produce valid digest
+        assert!(digest.len() > 8);
+    }
 }

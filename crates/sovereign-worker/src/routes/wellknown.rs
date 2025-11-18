@@ -80,4 +80,43 @@ mod tests {
         let wf = build_webfinger("alice", "example.com");
         assert_eq!(wf.subject, "acct:alice@example.com");
     }
+
+    #[test]
+    fn test_webfinger_links() {
+        let wf = build_webfinger("bob", "test.org");
+
+        assert_eq!(wf.links.len(), 1);
+        assert_eq!(wf.links[0].rel, "self");
+        assert_eq!(wf.links[0].link_type.as_ref().unwrap(), "application/activity+json");
+        assert_eq!(wf.links[0].href.as_ref().unwrap(), "https://test.org/users/bob");
+    }
+
+    #[test]
+    fn test_nodeinfo_structure() {
+        let ni = build_nodeinfo(10);
+
+        assert_eq!(ni.version, "2.1");
+        assert_eq!(ni.software.name, "sovereign");
+        assert_eq!(ni.usage.local_posts, 10);
+        assert_eq!(ni.usage.users.total, 1);
+    }
+
+    #[test]
+    fn test_did_document_structure() {
+        let doc = build_did_web_document("example.com", "zDnaertest123");
+
+        // Convert to JSON to test structure
+        let json = serde_json::to_value(&doc).unwrap();
+        assert!(json["id"].as_str().unwrap().contains("did:web:example.com"));
+        assert!(json["verificationMethod"].is_array());
+        assert!(json["service"].is_array());
+    }
+
+    #[test]
+    fn test_webfinger_aliases() {
+        let wf = build_webfinger("user", "domain.com");
+
+        assert!(!wf.aliases.is_empty());
+        assert!(wf.aliases[0].contains("domain.com"));
+    }
 }
