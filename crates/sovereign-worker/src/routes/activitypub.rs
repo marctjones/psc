@@ -1,7 +1,8 @@
 use worker::*;
-use sovereign_core::protocol::{build_actor, build_collection, activitypub_context};
+use sovereign_core::protocol::{build_actor, build_collection};
+use sovereign_core::types::activitypub::activitypub_context;
 
-use super::{activitypub_response, json_response, error_response, get_domain, get_username};
+use super::{activitypub_response, error_response, get_domain, get_username};
 use crate::crypto::signatures;
 
 /// Get actor document

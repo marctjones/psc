@@ -1,5 +1,5 @@
 use worker::*;
-use serde::{Deserialize, Serialize};
+use worker::d1::D1Database;
 
 /// Database operations for D1
 
@@ -9,7 +9,7 @@ pub fn get_db(env: &Env) -> Result<D1Database> {
 }
 
 /// Initialize the database schema
-pub async fn initialize_schema(db: &D1Database) -> Result<()> {
+pub async fn initialize_schema(_db: &D1Database) -> Result<()> {
     // This would normally be done via migrations
     // But we can also run it programmatically
 

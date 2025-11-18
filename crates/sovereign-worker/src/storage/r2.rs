@@ -12,11 +12,11 @@ pub async fn put_blob(
     bucket: &Bucket,
     key: &str,
     data: Vec<u8>,
-    content_type: &str,
+    _content_type: &str,
 ) -> Result<()> {
+    // Note: content_type setting requires HttpMetadata in worker 0.4+
     bucket
         .put(key, data)
-        .content_type(content_type)
         .execute()
         .await?;
 
