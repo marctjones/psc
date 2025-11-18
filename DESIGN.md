@@ -1,8 +1,8 @@
-# Project Sovereign Core (V2.2)
+# Project Sovereign Core (V2.3)
 
 ## Consolidated Handoff Prompt (Final Version)
 
-We are beginning the creation of "Project Sovereign," a self-hosted digital ecosystem using only **commodity cloud services** (Cloudflare, AWS S3) and focusing entirely on **user freedom, simplicity, and low-cost maintenance**. Our goal is to make it easy for an individual to deploy their own digital presence.
+We are beginning the creation of "Project Sovereign," a self-hosted digital ecosystem using only **commodity cloud services** (Cloudflare free tier) and focusing entirely on **user freedom, simplicity, and low-cost maintenance**. Our goal is to make it easy for an individual to deploy their own digital presence at **zero ongoing cost**.
 
 We are specifically targeting services that currently trap users into proprietary single sign-on (SSO) systems (Google, Facebook, Amazon, Apple) and hosted social media. We are **not interested** in recreating existing, well-tested open-source tools like full email servers.
 
@@ -12,48 +12,116 @@ The current focus on the single-user ActivityPub/Bluesky server is **Step One**�
 
 ## 1. Architectural Mandate & Stack
 
-* **Goal:** A CLI-first, single-user system with "no-installer" portable binaries. We are **actively not interested in trying to make things scale**.
-* **Core Logic (Appliance):** C#/.NET 9+ (using NativeAOT for main CLI, Server, and UI).
-* **Security Layer (Integrity):** Rust (via FFI) for low-level cryptography only.
-* **Extension Layer (Flexibility):** Python for high-level scripting, demos, and automation.
+### 1.1 Goals
+* CLI-first, single-user system with portable binaries
+* **$0/month hosting** on Cloudflare free tier
+* We are **actively not interested in trying to make things scale**
+
+### 1.2 Technology Stack: Rust Only
+
+| Component | Technology | Deployment |
+|-----------|------------|------------|
+| **CLI Tool** | Rust (native binary) | User's machine |
+| **Server** | Rust → WebAssembly | Cloudflare Workers |
+| **Database** | Cloudflare D1 | Cloudflare (SQLite) |
+| **Blob Storage** | Cloudflare R2 | Cloudflare (S3-compatible) |
+| **DNS/CDN** | Cloudflare | Cloudflare |
+
+### 1.3 Why Rust Only?
+
+* **Small WASM binaries** - 100KB-500KB vs 2-5MB for .NET
+* **No runtime overhead** - Compiles directly to WASM
+* **First-class Cloudflare support** - Official tooling and examples
+* **Single language** - No FFI complexity between C# and Rust
+* **Cryptography built-in** - Native access to ring/RustCrypto
+
+### 1.4 Cloudflare Free Tier Limits
+
+| Service | Free Limit | Sufficient For |
+|---------|------------|----------------|
+| Workers | 100K requests/day | ~1 req/sec sustained |
+| D1 | 5GB, 5M reads/day | Years of posts |
+| R2 | 10GB storage | Thousands of images |
+| DNS | Unlimited | All needs |
 
 ---
 
-## 2. Python Isolation Mandate (CRITICAL)
+## 2. Deployment Architecture
 
-Python scripts must **ALWAYS** be developed and executed within **isolated environments** (e.g., venv, pipx). Dependencies must be minimized and limited to stable, popular libraries (e.g., requests, click). Python must not populate the host system.
+```
+┌─────────────────────────────────────────────────────┐
+│              CLOUDFLARE (Free Tier)                 │
+│                                                     │
+│  ┌─────────────────────────────────────────────┐   │
+│  │         Rust → WebAssembly                  │   │
+│  │                                             │   │
+│  │  - ActivityPub endpoints                    │   │
+│  │  - AT Protocol endpoints                    │   │
+│  │  - HTTP Signature creation/verification     │   │
+│  │  - JWT authentication                       │   │
+│  │  - All business logic                       │   │
+│  └─────────────────────────────────────────────┘   │
+│         │              │              │             │
+│         ▼              ▼              ▼             │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐        │
+│  │    D1    │   │    R2    │   │    KV    │        │
+│  │ (SQLite) │   │  (Blobs) │   │ (Cache)  │        │
+│  └──────────┘   └──────────┘   └──────────┘        │
+└─────────────────────────────────────────────────────┘
+                         ▲
+                         │ HTTPS
+                         ▼
+┌─────────────────────────────────────────────────────┐
+│                  USER'S MACHINE                     │
+│  ┌─────────────────────────────────────────────┐   │
+│  │  sovereign CLI (Rust native binary)         │   │
+│  │                                             │   │
+│  │  - User-facing commands                     │   │
+│  │  - Text-based UI                            │   │
+│  │  - Calls Cloudflare-hosted API              │   │
+│  └─────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 3. Required Functionality & Interactions
+## 3. Python Isolation Mandate (For Scripting/Demos Only)
 
-* **Identity Lifecycle:** The C# CLI must include `sovereign identity setup <domain>` and `cleanup` commands that automate DNS records (A, TXT) via the Cloudflare API.
-* **Protocol Implementation:** AT Protocol uses C# libraries. ActivityPub **MUST** call the Rust bridge for all cryptographic signing operations.
+Python scripts for demos and automation must **ALWAYS** be developed and executed within **isolated environments** (e.g., venv, pipx). Dependencies must be minimized and limited to stable, popular libraries (e.g., requests, click). Python must not populate the host system.
 
----
-
-## 4. Explicit Exclusions (DO NOT Implement)
-
-* Do not use **Python for the core server/CLI/UI logic.**
-* Do not use **Kubernetes, Docker Swarm, or complex scaling/load-balancing logic.**
-* Do not attempt to implement **custom low-level crypto or signatures** in C# or Python; delegate this to the Rust bridge.
-* Do not include **SMTP/Email hosting.**
+**Python is NOT used for any core functionality.**
 
 ---
 
-## 5. Future Trajectory (The Next Steps)
+## 4. Required Functionality & Interactions
+
+* **Identity Lifecycle:** The Rust CLI must include `sovereign identity setup <domain>` and `cleanup` commands that automate DNS records (A, TXT) via the Cloudflare API.
+* **Protocol Implementation:** Both AT Protocol and ActivityPub are implemented in Rust, with cryptographic operations using the `ring` or `RustCrypto` crates.
+
+---
+
+## 5. Explicit Exclusions (DO NOT Implement)
+
+* Do not use **any language other than Rust for core CLI/server logic**
+* Do not use **Kubernetes, Docker Swarm, or complex scaling/load-balancing logic**
+* Do not include **SMTP/Email hosting**
+* Do not require **any paid services** - everything must work on free tiers
+
+---
+
+## 6. Future Trajectory (The Next Steps)
 
 Once the core server is stable, the project's focus will shift to **brainstorming and prioritizing** future components that are **simple to build, cheap and easy to host**, and align with personal interest and user freedom (e.g., decentralized contacts/calendar, private photo archive, lightweight personal search).
 
 ---
 
-## 6. Bluesky / AT Protocol Implementation
+## 7. Bluesky / AT Protocol Implementation
 
-### 6.1 Overview
+### 7.1 Overview
 
 The AT Protocol (Authenticated Transfer Protocol) powers Bluesky. Our implementation includes both a **Personal Data Server (PDS)** for hosting your identity and data, and a **client** for interacting with the Bluesky network.
 
-### 6.2 Server Components (PDS)
+### 7.2 Server Components (PDS)
 
 #### Identity & Authentication
 * **DID Document Hosting:** Serve `did:web` or `did:plc` documents at `/.well-known/did.json`
@@ -64,7 +132,7 @@ The AT Protocol (Authenticated Transfer Protocol) powers Bluesky. Our implementa
 #### Data Repository
 * **Repository Structure:** Merkle Search Tree (MST) for content-addressable storage
 * **Record Types:** Posts, likes, reposts, follows, blocks, profile
-* **Blob Storage:** Images and media stored in S3, referenced by CID
+* **Blob Storage:** Images and media stored in R2, referenced by CID
 * **Repo Sync:** Export/import CAR files for data portability
 
 #### Lexicon Endpoints (Required)
@@ -101,7 +169,7 @@ app.bsky.notification.listNotifications
 app.bsky.notification.updateSeen
 ```
 
-### 6.3 Client Features (CLI Commands)
+### 7.3 Client Features (CLI Commands)
 
 #### Authentication
 ```bash
@@ -153,7 +221,7 @@ sovereign bsky profile [<handle>]
 sovereign bsky profile update --name "<name>" --bio "<bio>" --avatar <path>
 ```
 
-### 6.4 Federation with Bluesky Network
+### 7.4 Federation with Bluesky Network
 
 * **Relay Connection:** Subscribe to `bsky.network` firehose for global feed access
 * **AppView Delegation:** Use `api.bsky.app` for aggregated views (likes, reposts, followers counts)
@@ -162,13 +230,13 @@ sovereign bsky profile update --name "<name>" --bio "<bio>" --avatar <path>
 
 ---
 
-## 7. ActivityPub / Mastodon Implementation
+## 8. ActivityPub / Mastodon Implementation
 
-### 7.1 Overview
+### 8.1 Overview
 
 ActivityPub is the W3C standard powering Mastodon and the Fediverse. Our implementation includes a **single-user server** that can federate with any ActivityPub-compatible instance.
 
-### 7.2 Server Components
+### 8.2 Server Components
 
 #### Identity & Discovery
 * **WebFinger:** `/.well-known/webfinger?resource=acct:user@domain`
@@ -186,11 +254,11 @@ GET  /users/<username>/following # Following collection
 GET  /users/<username>/liked     # Liked posts
 ```
 
-#### HTTP Signatures (Rust Bridge - CRITICAL)
+#### HTTP Signatures
 All federated requests **MUST** be signed using HTTP Signatures (RFC 9421):
-* **Algorithm:** RSA-SHA256 or Ed25519
+* **Algorithm:** RSA-SHA256 or Ed25519 (using `ring` crate)
 * **Headers Signed:** `(request-target)`, `host`, `date`, `digest`
-* **Key Management:** RSA/Ed25519 keypair stored securely
+* **Key Management:** RSA/Ed25519 keypair stored in D1/KV
 * **Signature Verification:** Validate incoming requests from remote servers
 
 #### Activity Types (Send & Receive)
@@ -216,7 +284,7 @@ Document  # File attachment
 Question  # Poll
 ```
 
-### 7.3 Client Features (CLI Commands)
+### 8.3 Client Features (CLI Commands)
 
 #### Authentication
 ```bash
@@ -274,32 +342,32 @@ sovereign fedi poll "<question>" --option "<opt1>" --option "<opt2>" [--expires 
 sovereign fedi vote <post-url> <option-index>
 ```
 
-### 7.4 Federation Mechanics
+### 8.4 Federation Mechanics
 
 #### Following Remote Users
 1. **WebFinger Lookup:** Resolve `user@instance` to actor URL
 2. **Fetch Actor:** GET actor document to obtain inbox URL
 3. **Send Follow:** POST signed `Follow` activity to remote inbox
 4. **Receive Accept:** Remote server sends `Accept` to your inbox
-5. **Store Relationship:** Update local following list
+5. **Store Relationship:** Update D1 database
 
 #### Receiving Remote Posts
 1. **Inbox Delivery:** Remote servers POST activities to your inbox
-2. **Signature Verification:** Validate HTTP signature via Rust bridge
-3. **Activity Processing:** Parse and store relevant activities
+2. **Signature Verification:** Validate HTTP signature
+3. **Activity Processing:** Parse and store in D1
 4. **Timeline Update:** Add posts from followed users to home timeline
 
 #### Content Delivery
 1. **Create Activity:** Wrap post in `Create` activity
 2. **Recipient Resolution:** Determine followers' inboxes (with deduplication by shared inbox)
 3. **Signed Delivery:** POST signed activity to each unique inbox
-4. **Retry Logic:** Queue and retry failed deliveries
+4. **Retry Logic:** Queue failed deliveries in D1 for retry
 
 ---
 
-## 8. Unified CLI Structure
+## 9. Unified CLI Structure
 
-### 8.1 Top-Level Commands
+### 9.1 Top-Level Commands
 
 ```bash
 sovereign identity setup <domain>     # Initialize identity and DNS
@@ -307,9 +375,9 @@ sovereign identity cleanup            # Remove DNS records and clean up
 sovereign identity export             # Export identity/keys for backup
 sovereign identity import <file>      # Import identity from backup
 
-sovereign server start [--port <n>]   # Start the local server
-sovereign server stop                 # Stop the server
-sovereign server status               # Check server status
+sovereign server deploy               # Deploy to Cloudflare Workers
+sovereign server status               # Check deployment status
+sovereign server logs                 # View recent logs
 
 sovereign bsky <command>              # Bluesky/AT Protocol commands
 sovereign fedi <command>              # ActivityPub/Fediverse commands
@@ -319,7 +387,7 @@ sovereign config set <key> <value>    # Set configuration value
 sovereign config list                 # List all configuration
 ```
 
-### 8.2 Output Formatting
+### 9.2 Output Formatting
 
 All CLI output uses structured, readable text format:
 
@@ -337,7 +405,7 @@ Options for output:
 * `--plain` - Simple text without formatting
 * `--no-color` - Disable ANSI colors
 
-### 8.3 Interactive Mode
+### 9.3 Interactive Mode
 
 ```bash
 sovereign shell                       # Enter interactive mode
@@ -351,24 +419,13 @@ Interactive mode provides:
 
 ---
 
-## 9. Data Storage Architecture
+## 10. Data Storage Architecture
 
-### 9.1 Local Storage (SQLite)
+### 10.1 Cloudflare D1 (SQLite)
 
-```
-~/.sovereign/
-├── config.json              # User configuration
-├── sovereign.db             # Main SQLite database
-├── keys/
-│   ├── signing.key          # Private signing key (encrypted)
-│   └── signing.pub          # Public key
-├── blobs/
-│   └── <cid>/               # Cached media files
-└── logs/
-    └── sovereign.log        # Application logs
-```
+All structured data stored in Cloudflare D1:
 
-### 9.2 Database Schema (Core Tables)
+### 10.2 Database Schema (Core Tables)
 
 ```sql
 -- Identity
@@ -378,6 +435,8 @@ CREATE TABLE identity (
     display_name TEXT,
     bio TEXT,
     avatar_cid TEXT,
+    private_key_encrypted TEXT,
+    public_key TEXT,
     created_at TIMESTAMP
 );
 
@@ -436,53 +495,40 @@ CREATE TABLE delivery_queue (
 );
 ```
 
-### 9.3 Cloud Storage (S3)
+### 10.3 Cloudflare R2 (Blob Storage)
 
 * **Media Blobs:** Images, videos stored by content hash (CID)
 * **Repository Backups:** Periodic CAR file exports
-* **Static Assets:** Avatar, banner images served via Cloudflare CDN
+* **Static Assets:** Avatar, banner images
+
+### 10.4 Cloudflare KV (Optional Cache)
+
+* **Session tokens**
+* **Frequently accessed profiles**
+* **Rate limiting counters**
 
 ---
 
-## 10. Security Architecture
+## 11. Security Architecture
 
-### 10.1 Rust Cryptography Bridge
-
-The Rust bridge handles ALL cryptographic operations:
+### 11.1 Cryptography (Rust Crates)
 
 ```rust
-// Core signing interface
-pub fn sign_message(key: &[u8], message: &[u8]) -> Vec<u8>;
-pub fn verify_signature(pubkey: &[u8], message: &[u8], sig: &[u8]) -> bool;
-
-// HTTP Signatures for ActivityPub
-pub fn create_http_signature(
-    key: &[u8],
-    method: &str,
-    path: &str,
-    headers: &HashMap<String, String>
-) -> String;
-
-pub fn verify_http_signature(
-    pubkey: &[u8],
-    signature_header: &str,
-    method: &str,
-    path: &str,
-    headers: &HashMap<String, String>
-) -> bool;
-
-// Key management
-pub fn generate_keypair() -> (Vec<u8>, Vec<u8>);
-pub fn export_public_key_pem(pubkey: &[u8]) -> String;
+// Recommended crates
+ring        // Fast, safe crypto primitives
+ed25519-dalek  // Ed25519 signatures
+rsa         // RSA signatures for ActivityPub
+sha2        // SHA-256 for digests
+base64      // Encoding
 ```
 
-### 10.2 Key Storage
+### 11.2 Key Storage
 
-* Private keys encrypted at rest using system keyring or passphrase
-* Keys never exposed to Python or transmitted over network
-* Separate keys for AT Protocol and ActivityPub (different algorithms supported)
+* Private keys encrypted with user passphrase
+* Stored in D1 (encrypted) or Cloudflare Secrets
+* Never transmitted - signing happens in Worker
 
-### 10.3 Authentication Flows
+### 11.3 Authentication Flows
 
 #### AT Protocol
 1. Create session with identifier + password
@@ -492,46 +538,116 @@ pub fn export_public_key_pem(pubkey: &[u8]) -> String;
 
 #### ActivityPub
 1. All server-to-server requests signed with HTTP Signatures
-2. Local CLI authenticated via local socket or token file
+2. CLI authenticated via API token stored locally
 3. No passwords transmitted during federation
 
 ---
 
-## 11. Cloudflare Integration
+## 12. Cloudflare Integration
 
-### 11.1 DNS Management
+### 12.1 DNS Management
 
 ```bash
 sovereign identity setup mydomain.com
 ```
 
 Automatically creates:
-* `A` record pointing to server IP
+* `A` record pointing to Workers (or CNAME to workers.dev)
 * `TXT` record for AT Protocol handle verification: `_atproto.mydomain.com`
 * `TXT` record for domain verification
 
-### 11.2 Cloudflare Services Used
+### 12.2 Worker Deployment
 
-* **DNS:** Handle resolution, domain verification
-* **CDN:** Cache static assets and media
-* **SSL:** Automatic HTTPS certificates
-* **Workers (Optional):** Edge caching for public endpoints
+```bash
+sovereign server deploy
+```
 
-### 11.3 Required API Permissions
+Uses Wrangler CLI under the hood:
+* Compiles Rust to WASM
+* Deploys to Cloudflare Workers
+* Binds D1, R2, KV resources
+
+### 12.3 Required API Permissions
 
 * `Zone.DNS` - Read and write DNS records
 * `Zone.Zone` - Read zone information
+* `Workers Scripts` - Deploy workers
+* `D1` - Database access
+* `R2` - Blob storage access
 
 ---
 
-## 12. Implementation Phases
+## 13. Rust Project Structure
+
+```
+sovereign/
+├── Cargo.toml
+├── Cargo.lock
+├── wrangler.toml              # Cloudflare Worker config
+│
+├── crates/
+│   ├── sovereign-cli/         # Native CLI binary
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── main.rs
+│   │       ├── commands/
+│   │       │   ├── mod.rs
+│   │       │   ├── identity.rs
+│   │       │   ├── bsky.rs
+│   │       │   ├── fedi.rs
+│   │       │   └── config.rs
+│   │       └── ui/
+│   │           ├── mod.rs
+│   │           └── formatting.rs
+│   │
+│   ├── sovereign-worker/      # Cloudflare Worker (WASM)
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── routes/
+│   │       │   ├── mod.rs
+│   │       │   ├── atproto.rs
+│   │       │   ├── activitypub.rs
+│   │       │   └── wellknown.rs
+│   │       ├── crypto/
+│   │       │   ├── mod.rs
+│   │       │   ├── signatures.rs
+│   │       │   └── jwt.rs
+│   │       └── storage/
+│   │           ├── mod.rs
+│   │           ├── d1.rs
+│   │           └── r2.rs
+│   │
+│   └── sovereign-core/        # Shared library
+│       ├── Cargo.toml
+│       └── src/
+│           ├── lib.rs
+│           ├── types/
+│           │   ├── mod.rs
+│           │   ├── atproto.rs
+│           │   └── activitypub.rs
+│           └── protocol/
+│               ├── mod.rs
+│               ├── lexicon.rs
+│               └── activity.rs
+│
+├── migrations/                # D1 database migrations
+│   └── 0001_initial.sql
+│
+└── scripts/                   # Python helper scripts (isolated)
+    └── demo.py
+```
+
+---
+
+## 14. Implementation Phases
 
 ### Phase 1: Foundation
-- [ ] C# CLI scaffold with command parsing
-- [ ] Rust FFI bridge for cryptography
-- [ ] SQLite database initialization
-- [ ] Configuration management
-- [ ] Cloudflare DNS automation
+- [ ] Rust workspace setup with three crates
+- [ ] Cloudflare Worker scaffold (wrangler)
+- [ ] D1 database schema and migrations
+- [ ] Basic CLI with config management
+- [ ] Cloudflare API integration (DNS)
 
 ### Phase 2: AT Protocol / Bluesky
 - [ ] DID document generation and hosting
@@ -539,12 +655,12 @@ Automatically creates:
 - [ ] Repository structure (MST)
 - [ ] Core lexicon endpoints
 - [ ] Client commands (post, timeline, follow)
-- [ ] Media upload to S3
+- [ ] Media upload to R2
 - [ ] Federation with bsky.network relay
 
 ### Phase 3: ActivityPub / Mastodon
 - [ ] WebFinger and actor documents
-- [ ] HTTP Signatures (Rust)
+- [ ] HTTP Signatures (ring crate)
 - [ ] Inbox/outbox endpoints
 - [ ] Activity send/receive
 - [ ] Client commands (post, timeline, follow)
@@ -563,23 +679,55 @@ Automatically creates:
 
 ---
 
-## 13. Testing Strategy
+## 15. Testing Strategy
 
-### 13.1 Unit Tests
-* Cryptographic operations (Rust)
+### 15.1 Unit Tests
+* Cryptographic operations
 * Database operations
 * Activity parsing/generation
 * CLI command parsing
 
-### 13.2 Integration Tests
+### 15.2 Integration Tests
 * Full post creation flow
 * Follow/unfollow cycle
 * Federation delivery simulation
 
-### 13.3 Federation Testing
+### 15.3 Federation Testing
 * Test against Mastodon instance (docker)
 * Test against Bluesky PDS sandbox
 * Signature verification with real servers
+
+### 15.4 Local Development
+* Wrangler dev mode for local Worker testing
+* Miniflare for D1/R2/KV simulation
+
+---
+
+## 16. Key Dependencies (Rust Crates)
+
+### Worker (WASM)
+```toml
+[dependencies]
+worker = "0.0.18"              # Cloudflare Workers SDK
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ring = "0.17"                  # Cryptography
+base64 = "0.21"
+chrono = "0.4"
+```
+
+### CLI (Native)
+```toml
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+colored = "2"                  # Terminal colors
+dialoguer = "0.11"             # Interactive prompts
+indicatif = "0.17"             # Progress bars
+```
 
 ---
 
@@ -587,13 +735,22 @@ Automatically creates:
 
 **Design is now comprehensive. No code has been generated yet.**
 
+### Architecture Summary
+
+* **Language:** Rust only
+* **Hosting:** Cloudflare free tier ($0/month)
+* **CLI:** Native Rust binary on user's machine
+* **Server:** Rust → WASM on Cloudflare Workers
+* **Storage:** D1 (SQLite) + R2 (blobs)
+
 ### Ready for Implementation
 
-The design now covers:
+The design covers:
 - Full Bluesky/AT Protocol client and server
 - Full ActivityPub/Mastodon client and server
 - Complete CLI command structure for all user features
 - Federation mechanics for connecting to external servers
 - Data storage and security architecture
+- Rust project structure and dependencies
 
 **Next step: Proceed with code generation starting from Phase 1 (Foundation)?**
