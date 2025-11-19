@@ -2,9 +2,11 @@
 
 mod feed;
 mod web;
+mod discover;
 
 pub use feed::FeedFetcher;
 pub use web::WebFetcher;
+pub use discover::{discover_feeds, analyze_site, DiscoveredFeed, SiteAnalysis, SiteType, FeedType};
 
 use crate::{Article, FetchResult, Source, SourceType};
 use anyhow::Result;
@@ -24,7 +26,7 @@ pub async fn fetch_source(source: &Source) -> Result<FetchResult> {
             let fetcher = FeedFetcher::new();
             fetcher.fetch(source).await
         }
-        SourceType::Web => {
+        SourceType::Web | SourceType::Track => {
             let fetcher = WebFetcher::new();
             fetcher.fetch(source).await
         }

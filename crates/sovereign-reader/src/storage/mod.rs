@@ -118,6 +118,7 @@ impl Storage {
                 let source_type = match source_type_str.as_str() {
                     "Feed" => SourceType::Feed,
                     "Web" => SourceType::Web,
+                    "Track" => SourceType::Track,
                     "Wikipedia" => SourceType::Wikipedia,
                     _ => SourceType::Feed,
                 };

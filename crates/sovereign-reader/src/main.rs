@@ -61,6 +61,21 @@ enum Commands {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+    /// Discover RSS feeds on a website
+    Discover {
+        /// Website URL to analyze
+        url: String,
+        /// Automatically add discovered feeds
+        #[arg(short, long)]
+        add: bool,
+    },
+    /// Track a website for changes (for sites without RSS)
+    Track {
+        /// Website URL to track
+        url: String,
+        /// Name for the source
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -171,6 +186,8 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::List { limit } => handle_list(limit, &storage),
         Commands::Read { article_id } => handle_read(article_id, &storage),
         Commands::Config { command } => handle_config(command, &storage),
+        Commands::Discover { url, add } => handle_discover(url, add, &storage).await,
+        Commands::Track { url, name } => handle_track(url, name, &storage).await,
     }
 }
 
@@ -600,4 +617,151 @@ fn handle_config(command: ConfigCommands, storage: &Storage) -> Result<()> {
             Ok(())
         }
     }
+}
+
+async fn handle_discover(url: String, add: bool, storage: &Storage) -> Result<()> {
+    println!("{}", "Discovering feeds...".cyan().bold());
+    println!("URL: {}\n", url);
+
+    // Analyze the site
+    let analysis = sources::analyze_site(&url).await?;
+
+    if analysis.feeds.is_empty() {
+        println!("{}", "No RSS/Atom feeds found.".yellow());
+
+        if analysis.supports_scraping {
+            println!(
+                "\nThis site can be tracked for changes using:\n  {}",
+                format!("sovereign-reader track \"{}\" \"Site Name\"", url).dimmed()
+            );
+
+            if let Some(selector) = analysis.recommended_selector {
+                println!("  Recommended CSS selector: {}", selector);
+            }
+        }
+
+        return Ok(());
+    }
+
+    println!("{}", "Discovered feeds:".green().bold());
+    println!("{}", "=".repeat(60));
+
+    for (i, feed) in analysis.feeds.iter().enumerate() {
+        let feed_type = match feed.feed_type {
+            sources::FeedType::Rss => "RSS",
+            sources::FeedType::Atom => "Atom",
+            sources::FeedType::Json => "JSON",
+            sources::FeedType::Unknown => "Feed",
+        };
+
+        println!("\n{}. {}", i + 1, feed.url);
+        if let Some(title) = &feed.title {
+            println!("   Title: {}", title);
+        }
+        println!("   Type: {}", feed_type);
+    }
+
+    if add {
+        println!("\n{}", "Adding discovered feeds...".cyan());
+
+        for feed in &analysis.feeds {
+            let id = feed
+                .title
+                .as_ref()
+                .map(|t| {
+                    t.to_lowercase()
+                        .replace(' ', "-")
+                        .chars()
+                        .filter(|c| c.is_alphanumeric() || *c == '-')
+                        .collect()
+                })
+                .unwrap_or_else(|| format!("feed-{}", uuid_simple()));
+
+            let name = feed
+                .title
+                .clone()
+                .unwrap_or_else(|| format!("Feed from {}", url));
+
+            let source = Source {
+                id: id.clone(),
+                name,
+                source_type: SourceType::Feed,
+                url: feed.url.clone(),
+                sections: vec![],
+                enabled: true,
+                last_fetched: None,
+            };
+
+            storage.save_source(&source)?;
+            println!("  {} Added '{}'", "OK".green(), id);
+        }
+    } else {
+        println!(
+            "\nUse {} to automatically add these feeds.",
+            "sovereign-reader discover <url> --add".dimmed()
+        );
+    }
+
+    Ok(())
+}
+
+async fn handle_track(url: String, name: String, storage: &Storage) -> Result<()> {
+    println!("{}", "Setting up site tracking...".cyan().bold());
+
+    // Analyze the site first
+    let analysis = sources::analyze_site(&url).await?;
+
+    // Warn if site has feeds
+    if !analysis.feeds.is_empty() {
+        println!(
+            "{} This site has RSS feeds available. Consider using those instead:",
+            "Note:".yellow().bold()
+        );
+        for feed in &analysis.feeds {
+            println!("  - {}", feed.url);
+        }
+        println!();
+    }
+
+    let id = name
+        .to_lowercase()
+        .replace(' ', "-")
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-')
+        .collect::<String>();
+
+    let source = Source {
+        id: id.clone(),
+        name,
+        source_type: SourceType::Track,
+        url,
+        sections: vec![],
+        enabled: true,
+        last_fetched: None,
+    };
+
+    storage.save_source(&source)?;
+
+    println!("{} Now tracking '{}' for changes", "OK".green().bold(), id);
+
+    if let Some(selector) = analysis.recommended_selector {
+        println!("  Using selector: {}", selector);
+    }
+
+    println!(
+        "\nRun {} to fetch articles.",
+        "sovereign-reader fetch".dimmed()
+    );
+
+    Ok(())
+}
+
+/// Generate a simple unique ID
+fn uuid_simple() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("{:x}", time)
 }

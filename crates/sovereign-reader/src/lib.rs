@@ -35,8 +35,10 @@ pub struct Source {
 pub enum SourceType {
     /// RSS/Atom feed
     Feed,
-    /// Web scraping
+    /// Web scraping (one-time fetch)
     Web,
+    /// Track a page for changes (stores hashes)
+    Track,
     /// Wikipedia
     Wikipedia,
 }
