@@ -4,3 +4,4 @@ pub mod server;
 pub mod bsky;
 pub mod fedi;
 pub mod test;
+pub mod auth;

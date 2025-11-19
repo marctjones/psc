@@ -5,7 +5,7 @@ use std::process;
 mod commands;
 mod ui;
 
-use commands::{identity, config, bsky, fedi, server, test};
+use commands::{identity, config, bsky, fedi, server, test, auth};
 
 #[derive(Parser)]
 #[command(name = "sovereign")]
@@ -47,6 +47,11 @@ enum Commands {
     Test {
         #[command(subcommand)]
         command: TestCommands,
+    },
+    /// Authenticate with your Sovereign server
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommands,
     },
 }
 
@@ -238,6 +243,40 @@ enum TestCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum AuthCommands {
+    /// Log in to your Sovereign server using device authorization
+    Login {
+        /// Server URL (e.g., https://yourdomain.com)
+        server: String,
+        /// Requested scopes (default: read write)
+        #[arg(short, long, default_value = "read write")]
+        scope: String,
+    },
+    /// Log out and revoke tokens
+    Logout,
+    /// Show current authentication status
+    Status,
+    /// Refresh access token
+    Refresh,
+    /// Register a new OAuth client (for third-party apps)
+    RegisterClient {
+        /// Client name
+        name: String,
+        /// Redirect URIs (comma-separated)
+        #[arg(long)]
+        redirect_uris: Option<String>,
+        /// Scopes (default: read)
+        #[arg(long, default_value = "read")]
+        scope: String,
+    },
+    /// List registered OAuth clients
+    ListClients {
+        /// Server URL
+        server: String,
+    },
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -305,6 +344,19 @@ async fn main() {
                     test::remote_user(parts[0], parts[1]).await
                 }
             }
+        },
+        Commands::Auth { command } => match command {
+            AuthCommands::Login { server, scope } => auth::login(&server, &scope).await,
+            AuthCommands::Logout => auth::logout().await,
+            AuthCommands::Status => auth::status().await,
+            AuthCommands::Refresh => auth::refresh().await,
+            AuthCommands::RegisterClient { name, redirect_uris, scope } => {
+                let uris: Vec<String> = redirect_uris
+                    .map(|s| s.split(',').map(|u| u.trim().to_string()).collect())
+                    .unwrap_or_default();
+                auth::register_client(&name, &uris, &scope).await
+            }
+            AuthCommands::ListClients { server } => auth::list_clients(&server).await,
         },
     };
 

@@ -236,3 +236,266 @@ pub async fn get_pending_deliveries(
 
     Ok(results.results()?)
 }
+
+// OAuth operations
+
+/// Create an OAuth client
+pub async fn create_oauth_client(
+    db: &D1Database,
+    client_id: &str,
+    client_secret: &str,
+    name: &str,
+    redirect_uris: &[String],
+    grant_types: &[String],
+    scope: &str,
+) -> Result<()> {
+    let stmt = db.prepare(
+        "INSERT INTO oauth_clients (client_id, client_secret, name, redirect_uris, grant_types, scope, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))"
+    );
+
+    stmt.bind(&[
+        client_id.into(),
+        client_secret.into(),
+        name.into(),
+        serde_json::to_string(redirect_uris).unwrap_or_default().into(),
+        serde_json::to_string(grant_types).unwrap_or_default().into(),
+        scope.into(),
+    ])?
+    .run()
+    .await?;
+
+    Ok(())
+}
+
+/// Get an OAuth client by ID
+pub async fn get_oauth_client(db: &D1Database, client_id: &str) -> Result<Option<serde_json::Value>> {
+    let stmt = db.prepare("SELECT * FROM oauth_clients WHERE client_id = ?");
+
+    let result = stmt.bind(&[client_id.into()])?
+        .first::<serde_json::Value>(None)
+        .await?;
+
+    Ok(result)
+}
+
+/// List all OAuth clients
+pub async fn list_oauth_clients(db: &D1Database) -> Result<Vec<serde_json::Value>> {
+    let stmt = db.prepare("SELECT client_id, name, redirect_uris, grant_types, scope, created_at FROM oauth_clients");
+
+    let results = stmt.all().await?;
+    Ok(results.results()?)
+}
+
+/// Delete an OAuth client
+pub async fn delete_oauth_client(db: &D1Database, client_id: &str) -> Result<()> {
+    let stmt = db.prepare("DELETE FROM oauth_clients WHERE client_id = ?");
+    stmt.bind(&[client_id.into()])?.run().await?;
+    Ok(())
+}
+
+/// Create device authorization
+pub async fn create_device_auth(
+    db: &D1Database,
+    device_code: &str,
+    user_code: &str,
+    client_id: &str,
+    scope: &str,
+) -> Result<()> {
+    let stmt = db.prepare(
+        "INSERT INTO device_authorizations (device_code, user_code, client_id, scope, status, created_at, expires_at)
+         VALUES (?, ?, ?, ?, 'pending', datetime('now'), datetime('now', '+10 minutes'))"
+    );
+
+    stmt.bind(&[
+        device_code.into(),
+        user_code.into(),
+        client_id.into(),
+        scope.into(),
+    ])?
+    .run()
+    .await?;
+
+    Ok(())
+}
+
+/// Get device authorization status
+pub async fn get_device_auth_status(db: &D1Database, device_code: &str) -> Result<String> {
+    let stmt = db.prepare(
+        "SELECT CASE
+            WHEN expires_at < datetime('now') THEN 'expired'
+            ELSE status
+         END as status
+         FROM device_authorizations WHERE device_code = ?"
+    );
+
+    let result = stmt.bind(&[device_code.into()])?
+        .first::<serde_json::Value>(None)
+        .await?;
+
+    Ok(result
+        .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(|s| s.to_string()))
+        .unwrap_or_else(|| "invalid".to_string()))
+}
+
+/// Get device auth info (client_id and scope)
+pub async fn get_device_auth_info(db: &D1Database, device_code: &str) -> Result<(String, String)> {
+    let stmt = db.prepare("SELECT client_id, scope FROM device_authorizations WHERE device_code = ?");
+
+    let result = stmt.bind(&[device_code.into()])?
+        .first::<serde_json::Value>(None)
+        .await?;
+
+    let client_id = result
+        .as_ref()
+        .and_then(|v| v.get("client_id").and_then(|s| s.as_str()))
+        .unwrap_or("unknown")
+        .to_string();
+
+    let scope = result
+        .and_then(|v| v.get("scope").and_then(|s| s.as_str()).map(|s| s.to_string()))
+        .unwrap_or_else(|| "read".to_string());
+
+    Ok((client_id, scope))
+}
+
+/// Authorize a device by user code
+pub async fn authorize_device(db: &D1Database, user_code: &str) -> Result<bool> {
+    let stmt = db.prepare(
+        "UPDATE device_authorizations SET status = 'authorized'
+         WHERE user_code = ? AND status = 'pending' AND expires_at > datetime('now')"
+    );
+
+    let _result = stmt.bind(&[user_code.into()])?.run().await?;
+
+    // Check if device was authorized by querying
+    let check_stmt = db.prepare("SELECT 1 FROM device_authorizations WHERE user_code = ? AND status = 'authorized'");
+    let check_result = check_stmt.bind(&[user_code.into()])?
+        .first::<serde_json::Value>(None)
+        .await?;
+
+    Ok(check_result.is_some())
+}
+
+/// Mark device auth as complete
+pub async fn complete_device_auth(db: &D1Database, device_code: &str) -> Result<()> {
+    let stmt = db.prepare("UPDATE device_authorizations SET status = 'complete' WHERE device_code = ?");
+    stmt.bind(&[device_code.into()])?.run().await?;
+    Ok(())
+}
+
+/// Create access token
+pub async fn create_access_token(
+    db: &D1Database,
+    token: &str,
+    username: &str,
+    client_id: &str,
+    scope: &str,
+    expires_in: u32,
+) -> Result<()> {
+    let stmt = db.prepare(
+        "INSERT INTO access_tokens (token, username, client_id, scope, created_at, expires_at)
+         VALUES (?, ?, ?, ?, datetime('now'), datetime('now', '+' || ? || ' seconds'))"
+    );
+
+    stmt.bind(&[
+        token.into(),
+        username.into(),
+        client_id.into(),
+        scope.into(),
+        expires_in.to_string().into(),
+    ])?
+    .run()
+    .await?;
+
+    Ok(())
+}
+
+/// Get access token info
+pub async fn get_access_token_info(
+    db: &D1Database,
+    token: &str,
+) -> Result<Option<(String, String, String, String)>> {
+    let stmt = db.prepare(
+        "SELECT username, client_id, scope, expires_at
+         FROM access_tokens
+         WHERE token = ? AND expires_at > datetime('now')"
+    );
+
+    let result = stmt.bind(&[token.into()])?
+        .first::<serde_json::Value>(None)
+        .await?;
+
+    Ok(result.map(|v| {
+        (
+            v.get("username").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            v.get("client_id").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            v.get("scope").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            v.get("expires_at").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+        )
+    }))
+}
+
+/// Revoke access token
+pub async fn revoke_access_token(db: &D1Database, token: &str) -> Result<()> {
+    let stmt = db.prepare("DELETE FROM access_tokens WHERE token = ?");
+    stmt.bind(&[token.into()])?.run().await?;
+    Ok(())
+}
+
+/// Create refresh token
+pub async fn create_refresh_token(
+    db: &D1Database,
+    token: &str,
+    access_token: &str,
+    username: &str,
+    client_id: &str,
+) -> Result<()> {
+    let stmt = db.prepare(
+        "INSERT INTO refresh_tokens (token, access_token, username, client_id, created_at)
+         VALUES (?, ?, ?, ?, datetime('now'))"
+    );
+
+    stmt.bind(&[
+        token.into(),
+        access_token.into(),
+        username.into(),
+        client_id.into(),
+    ])?
+    .run()
+    .await?;
+
+    Ok(())
+}
+
+/// Validate refresh token and get associated data
+pub async fn validate_refresh_token(
+    db: &D1Database,
+    token: &str,
+) -> Result<Option<(String, String, String)>> {
+    let stmt = db.prepare(
+        "SELECT r.username, r.client_id, COALESCE(a.scope, 'read') as scope
+         FROM refresh_tokens r
+         LEFT JOIN access_tokens a ON r.access_token = a.token
+         WHERE r.token = ?"
+    );
+
+    let result = stmt.bind(&[token.into()])?
+        .first::<serde_json::Value>(None)
+        .await?;
+
+    Ok(result.map(|v| {
+        (
+            v.get("username").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            v.get("client_id").and_then(|s| s.as_str()).unwrap_or("").to_string(),
+            v.get("scope").and_then(|s| s.as_str()).unwrap_or("read").to_string(),
+        )
+    }))
+}
+
+/// Revoke refresh token
+pub async fn revoke_refresh_token(db: &D1Database, token: &str) -> Result<()> {
+    let stmt = db.prepare("DELETE FROM refresh_tokens WHERE token = ?");
+    stmt.bind(&[token.into()])?.run().await?;
+    Ok(())
+}

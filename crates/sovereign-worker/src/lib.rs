@@ -4,7 +4,7 @@ mod routes;
 mod crypto;
 mod storage;
 
-use routes::{wellknown, activitypub, atproto};
+use routes::{wellknown, activitypub, atproto, oauth};
 
 #[event(fetch)]
 async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
@@ -39,6 +39,18 @@ async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/xrpc/com.atproto.repo.createRecord", atproto::create_record)
         .get_async("/xrpc/com.atproto.repo.getRecord", atproto::get_record)
         .get_async("/xrpc/com.atproto.identity.resolveHandle", atproto::resolve_handle)
+
+        // OAuth endpoints
+        .get_async("/.well-known/oauth-authorization-server", oauth::metadata)
+        .post_async("/oauth/device", oauth::device_authorize)
+        .get_async("/oauth/device/verify", oauth::device_verify_page)
+        .post_async("/oauth/device/verify", oauth::device_verify_submit)
+        .post_async("/oauth/token", oauth::token)
+        .post_async("/oauth/revoke", oauth::revoke)
+        .post_async("/oauth/introspect", oauth::introspect)
+        .post_async("/oauth/register", oauth::register_client)
+        .get_async("/oauth/clients", oauth::list_clients)
+        .delete_async("/oauth/clients/:client_id", oauth::delete_client)
 
         // Run the router
         .run(req, env)

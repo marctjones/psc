@@ -1,6 +1,7 @@
 pub mod wellknown;
 pub mod activitypub;
 pub mod atproto;
+pub mod oauth;
 
 use worker::*;
 
