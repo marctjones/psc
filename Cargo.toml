@@ -4,6 +4,7 @@ members = [
     "crates/sovereign-cli",
     "crates/sovereign-worker",
     "crates/sovereign-core",
+    "crates/sovereign-reader",
 ]
 
 [workspace.package]

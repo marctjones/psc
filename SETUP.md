@@ -7,6 +7,7 @@ This guide walks you through setting up and testing Sovereign on your Ubuntu des
 - **sovereign-core**: ✅ Builds and tests pass (32 tests)
 - **sovereign-cli**: ✅ Builds and tests pass (11 tests)
 - **sovereign-worker**: ✅ Builds and tests pass (16 tests)
+- **sovereign-reader**: ✅ Builds (personal news aggregator)
 
 ---
 
@@ -585,6 +586,118 @@ If npm install fails:
 npm install wrangler
 npx wrangler --version
 ```
+
+---
+
+## Sovereign Reader - Personal News Aggregator
+
+A separate Unix-philosophy tool for creating a personalized daily newspaper from your favorite sources.
+
+### Building
+
+```bash
+cargo build --release -p sovereign-reader
+```
+
+### Quick Start
+
+```bash
+# Add some news sources
+sovereign-reader source add-known lwn
+sovereign-reader source add-known ars
+sovereign-reader source add-known hackernews
+
+# Set up your interests for Wikipedia recommendations
+sovereign-reader interest add-topic "Rust programming"
+sovereign-reader interest add-topic "Linux kernel"
+sovereign-reader interest add-keyword "open source"
+
+# Fetch articles from all sources
+sovereign-reader fetch
+
+# Generate your daily digest
+sovereign-reader digest --format markdown --output today.md
+
+# Or view in terminal
+sovereign-reader digest --format plain
+```
+
+### Managing Sources
+
+```bash
+# See available pre-configured sources
+sovereign-reader source available
+
+# Add a custom RSS feed
+sovereign-reader source add "My Blog" https://example.com/feed.xml
+
+# Enable/disable sources
+sovereign-reader source enable lwn
+sovereign-reader source disable nytimes
+
+# List configured sources
+sovereign-reader source list
+```
+
+### Available Pre-configured Sources
+
+- `lwn` - LWN.net (Linux/Open Source news)
+- `ars` - Ars Technica
+- `hackernews` - Hacker News
+- `nytimes` - New York Times
+- `wapo` - Washington Post
+- `bbc` - BBC News
+- `guardian` - The Guardian
+- `reuters` - Reuters
+
+### Managing Interests
+
+Interests help the reader find relevant Wikipedia articles and score content:
+
+```bash
+# Add topics
+sovereign-reader interest add-topic "machine learning"
+sovereign-reader interest add-topic "cryptography"
+
+# Add keywords to boost
+sovereign-reader interest add-keyword "security"
+
+# Block keywords you don't want
+sovereign-reader interest block "celebrity"
+
+# View your interests
+sovereign-reader interest show
+```
+
+### Configuration
+
+```bash
+# Show current config
+sovereign-reader config show
+
+# Set articles per source in digest
+sovereign-reader config articles-per-source 10
+
+# Set number of Wikipedia articles
+sovereign-reader config wikipedia-articles 5
+
+# Set fetch interval
+sovereign-reader config fetch-interval 12
+```
+
+### Digest Formats
+
+- **markdown** - Good for reading or converting to other formats
+- **html** - Open in a browser
+- **plain** - Terminal-friendly plain text
+- **json** - For further processing
+
+### Wikipedia Integration
+
+The reader automatically includes:
+- Featured article of the day
+- "On This Day" historical articles
+- Articles matching your interests that you haven't read before
 
 ---
 

@@ -1,0 +1,59 @@
+[package]
+name = "sovereign-reader"
+version = "0.1.0"
+edition = "2021"
+description = "Personal news aggregator and daily digest generator"
+license = "MIT"
+
+[[bin]]
+name = "sovereign-reader"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+colored = "2"
+
+# RSS/Atom parsing
+feed-rs = "2"
+
+# HTML parsing
+scraper = "0.21"
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Async traits
+async-trait = "0.1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Config
+toml = "0.8"
+dirs = "5"
+
+# Template rendering for digest
+minijinja = "2"
+
+# URL handling
+url = "2"
+urlencoding = "2"
