@@ -7,6 +7,7 @@ pub mod sources;
 pub mod wikipedia;
 pub mod digest;
 pub mod storage;
+pub mod llm;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

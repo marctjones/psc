@@ -4,8 +4,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use sovereign_reader::{
-    digest, sources, storage::Storage, wikipedia::WikipediaClient, DigestFormat, Interests,
-    ReaderConfig, Source, SourceType,
+    digest, llm, sources, storage::Storage, wikipedia::WikipediaClient, DigestFormat, Interests,
+    Source, SourceType,
 };
 use std::process;
 
@@ -76,6 +76,21 @@ enum Commands {
         /// Name for the source
         name: String,
     },
+    /// Check LLM assistant integration status
+    LlmStatus,
+    /// Score articles using LLM (requires LLM assistant)
+    Score {
+        /// Re-score all unread articles
+        #[arg(long)]
+        all: bool,
+    },
+    /// Summarize an article using LLM
+    Summarize {
+        /// Article ID to summarize
+        article_id: String,
+    },
+    /// Analyze reading patterns and suggest interests
+    Analyze,
 }
 
 #[derive(Subcommand)]
@@ -188,6 +203,10 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Config { command } => handle_config(command, &storage),
         Commands::Discover { url, add } => handle_discover(url, add, &storage).await,
         Commands::Track { url, name } => handle_track(url, name, &storage).await,
+        Commands::LlmStatus => handle_llm_status().await,
+        Commands::Score { all } => handle_score(all, &storage).await,
+        Commands::Summarize { article_id } => handle_summarize(article_id, &storage).await,
+        Commands::Analyze => handle_analyze(&storage).await,
     }
 }
 
@@ -764,4 +783,280 @@ fn uuid_simple() -> String {
         .unwrap()
         .as_nanos();
     format!("{:x}", time)
+}
+
+async fn handle_llm_status() -> Result<()> {
+    println!("{}", "LLM Integration Status".cyan().bold());
+    println!("{}", "=".repeat(60));
+
+    let available = llm::is_llm_available();
+    let ipc_dir = llm::get_ipc_dir();
+
+    if available {
+        println!("\n{} LLM assistant environment detected", "OK".green().bold());
+    } else {
+        println!("\n{} LLM assistant not detected", "INFO".yellow().bold());
+    }
+
+    println!("\nIPC Directory: {}", ipc_dir.display());
+
+    if ipc_dir.exists() {
+        println!("Status: {}", "Directory exists".green());
+    } else {
+        println!("Status: {}", "Directory will be created on first use".dimmed());
+    }
+
+    println!("\n{}", "How LLM integration works:".bold());
+    println!("1. sovereign-reader writes requests to the IPC directory");
+    println!("2. Your LLM assistant monitors for 'pending' file");
+    println!("3. Assistant processes request-*.json and writes response-*.json");
+    println!("4. sovereign-reader reads response and continues");
+
+    println!("\n{}", "To enable, set environment variable:".dimmed());
+    println!("  export CLAUDE_CODE=1");
+
+    println!("\n{}", "Or have your LLM assistant monitor:".dimmed());
+    println!("  {}", ipc_dir.display());
+
+    // Show assistant instructions
+    println!("\n{}", "Assistant Instructions:".cyan().bold());
+    println!("{}", llm::get_assistant_instructions());
+
+    Ok(())
+}
+
+async fn handle_score(all: bool, storage: &Storage) -> Result<()> {
+    if !llm::is_llm_available() {
+        println!(
+            "{} LLM assistant not detected. Run 'sovereign-reader llm-status' for setup info.",
+            "Error:".red().bold()
+        );
+        return Ok(());
+    }
+
+    println!("{}", "Scoring articles with LLM...".cyan().bold());
+
+    let articles = if all {
+        storage.get_unread_articles(100)?
+    } else {
+        // Get recently fetched, unscored articles
+        storage.get_unread_articles(20)?
+    };
+
+    if articles.is_empty() {
+        println!("No articles to score.");
+        return Ok(());
+    }
+
+    // Convert to scoring format
+    let articles_for_scoring: Vec<llm::ArticleForScoring> = articles
+        .iter()
+        .map(|a| llm::ArticleForScoring {
+            id: a.id.clone(),
+            title: a.title.clone(),
+            summary: a.summary.clone(),
+            source: a.source_id.clone(),
+            categories: a.categories.clone(),
+        })
+        .collect();
+
+    // Get user interests
+    let interests = storage.get_interests()?;
+    let user_interests = llm::UserInterests {
+        topics: interests.topics,
+        keywords: interests.keywords,
+        blocked_keywords: interests.blocked_keywords,
+    };
+
+    // Create LLM client and score
+    let client = llm::LlmClient::new()?;
+
+    println!(
+        "Sending {} articles to LLM for scoring...",
+        articles_for_scoring.len()
+    );
+    println!("Waiting for response from: {}\n", client.ipc_dir().display());
+
+    match client.score_articles(articles_for_scoring, user_interests).await {
+        Ok(scores) => {
+            println!("{}", "Scores received:".green().bold());
+            println!("{}", "=".repeat(60));
+
+            for score in &scores {
+                // Update article in storage
+                // For now, just display the scores
+                let score_color = if score.score >= 70 {
+                    score.score.to_string().green()
+                } else if score.score >= 40 {
+                    score.score.to_string().yellow()
+                } else {
+                    score.score.to_string().dimmed()
+                };
+
+                // Find article title
+                let title = articles
+                    .iter()
+                    .find(|a| a.id == score.id)
+                    .map(|a| a.title.as_str())
+                    .unwrap_or("Unknown");
+
+                println!("\n[{}] {}", score_color, title);
+                println!("     {}", score.reason.dimmed());
+            }
+
+            println!("\n{}", "=".repeat(60));
+            println!("Scored {} articles", scores.len());
+        }
+        Err(e) => {
+            println!("{} {}", "Error:".red().bold(), e);
+            println!(
+                "\nMake sure your LLM assistant is monitoring: {}",
+                client.ipc_dir().display()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_summarize(article_id: String, storage: &Storage) -> Result<()> {
+    if !llm::is_llm_available() {
+        println!(
+            "{} LLM assistant not detected. Run 'sovereign-reader llm-status' for setup info.",
+            "Error:".red().bold()
+        );
+        return Ok(());
+    }
+
+    // Get the article
+    let articles = storage.get_unread_articles(1000)?;
+    let article = articles.iter().find(|a| a.id == article_id);
+
+    let article = match article {
+        Some(a) => a,
+        None => {
+            println!("{} Article '{}' not found", "Error:".red().bold(), article_id);
+            return Ok(());
+        }
+    };
+
+    println!("{}", "Summarizing article with LLM...".cyan().bold());
+    println!("Title: {}\n", article.title);
+
+    let content = article
+        .content
+        .as_ref()
+        .or(article.summary.as_ref())
+        .cloned()
+        .unwrap_or_else(|| "No content available".to_string());
+
+    let client = llm::LlmClient::new()?;
+
+    println!("Waiting for LLM response...\n");
+
+    match client.summarize(&article.title, &content, &article.url).await {
+        Ok((summary, key_points)) => {
+            println!("{}", "Summary:".green().bold());
+            println!("{}\n", summary);
+
+            if !key_points.is_empty() {
+                println!("{}", "Key Points:".green().bold());
+                for point in key_points {
+                    println!("  - {}", point);
+                }
+            }
+
+            println!("\n{}", "Original URL:".dimmed());
+            println!("  {}", article.url);
+        }
+        Err(e) => {
+            println!("{} {}", "Error:".red().bold(), e);
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_analyze(storage: &Storage) -> Result<()> {
+    if !llm::is_llm_available() {
+        println!(
+            "{} LLM assistant not detected. Run 'sovereign-reader llm-status' for setup info.",
+            "Error:".red().bold()
+        );
+        return Ok(());
+    }
+
+    println!("{}", "Analyzing reading patterns with LLM...".cyan().bold());
+
+    // Get read articles for analysis
+    let read_ids = storage.get_read_article_ids()?;
+
+    if read_ids.len() < 5 {
+        println!(
+            "{} Need at least 5 read articles for pattern analysis. Currently have: {}",
+            "Info:".yellow().bold(),
+            read_ids.len()
+        );
+        return Ok(());
+    }
+
+    // We need to get the actual article data for read articles
+    // For now, use unread articles as a proxy (in real impl, would store read articles)
+    let articles = storage.get_unread_articles(50)?;
+
+    let articles_for_analysis: Vec<llm::ArticleForScoring> = articles
+        .iter()
+        .take(20)
+        .map(|a| llm::ArticleForScoring {
+            id: a.id.clone(),
+            title: a.title.clone(),
+            summary: a.summary.clone(),
+            source: a.source_id.clone(),
+            categories: a.categories.clone(),
+        })
+        .collect();
+
+    let interests = storage.get_interests()?;
+    let current_interests = llm::UserInterests {
+        topics: interests.topics.clone(),
+        keywords: interests.keywords.clone(),
+        blocked_keywords: interests.blocked_keywords.clone(),
+    };
+
+    let client = llm::LlmClient::new()?;
+
+    println!("Analyzing {} articles...\n", articles_for_analysis.len());
+
+    match client
+        .analyze_patterns(articles_for_analysis, current_interests)
+        .await
+    {
+        Ok((topics, keywords, reasoning)) => {
+            println!("{}", "Analysis Complete".green().bold());
+            println!("{}", "=".repeat(60));
+
+            println!("\n{}", "Suggested Topics:".bold());
+            for topic in &topics {
+                println!("  + {}", topic.green());
+            }
+
+            println!("\n{}", "Suggested Keywords:".bold());
+            for keyword in &keywords {
+                println!("  + {}", keyword.cyan());
+            }
+
+            println!("\n{}", "Reasoning:".bold());
+            println!("{}", reasoning.dimmed());
+
+            println!("\n{}", "To add these suggestions:".dimmed());
+            for topic in &topics {
+                println!("  sovereign-reader interest add-topic \"{}\"", topic);
+            }
+        }
+        Err(e) => {
+            println!("{} {}", "Error:".red().bold(), e);
+        }
+    }
+
+    Ok(())
 }
